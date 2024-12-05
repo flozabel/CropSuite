@@ -1,0 +1,7 @@
+SRTM Data
+Farr, T. G., Rosen, P. A., Caro, E., Crippen, R., Duren, R., Hensley, S., Kobrick, M., Paller, M., Rodriguez, E., Roth, L., Seal, D., Shaffer, S., Shimada, J., Umland, J., Werner, M., Oskin, M., Burbank, D., and Alsdorf, D.: The Shuttle Radar Topography Mission, Reviews of Geophysics, 45, RG2004, 10.1029/2005RG000183, 2007.
+
+USDA Texture Classification File:
+Author: Gianluca Massei
+Website: http://maplab.alwaysdata.net/soilstools.html
+URL: https://github.com/gmassei/SoilTexture
