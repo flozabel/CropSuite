@@ -91,7 +91,7 @@ def run(silent_mode=False, config_file=None, gui = None):
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                    Version 1.3.0                    |
+        |                    Version 1.3.1                    |
         |                      2025-04-17                     |
         |                                                     |
         |                                                     |

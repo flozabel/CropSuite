@@ -567,7 +567,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             vernalization_params = [0, 0, 0, 0, 0, 0]
     else:
         wintercrop, vernalization_params = False, [0, 0, 0, 0, 0, 0]
-
+    
     if plant_params[plant].get('lethal_thresholds', [0])[0] == 1:
         try:
             lethal_params = [
@@ -575,6 +575,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
                 int(plant_params[plant].get('lethal_min_temp', [0])[0]),
                 int(plant_params[plant].get('lethal_max_temp_duration', [0])[0]),
                 int(plant_params[plant].get('lethal_max_temp', [0])[0])]
+            lethal = True
         except (ValueError, TypeError, IndexError):
             lethal, lethal_params = False, [0, 0, 0, 0]
     else:
@@ -624,14 +625,14 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         factor = {'darwin': 6, 'win32': 12}.get(sys.platform, 10)
     resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
     if wintercrop:
-        max_proc = int(np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads))
-        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads)
+        max_proc = int(np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads-1))
+        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads-1)
         max_proc = np.clip(int(max_proc), 1, no_threads)
         max_proc = np.clip(int(max_proc // 5), 1, no_threads-1)
     else:
-        max_proc = np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads)
-        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads)
-        max_proc = np.clip(int(max_proc), 1, no_threads)
+        max_proc = np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads-1)
+        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads-1)
+        max_proc = np.clip(int(max_proc), 1, no_threads-1)
     
     ### Climate Extremes / Climate Variability Module ###
     

@@ -474,7 +474,271 @@ class ConfigGUI(tk.Tk):
     def fill_param_tab(self):
         param_frm = ttk.LabelFrame(self.param_tab, text='Parameters')
         param_frm.pack(fill='x', padx=10, pady=5)
-        pgi.ParamGUI(self.config_ini_path, parent_frame=param_frm)
+        self.get_parameters = [key.split('.')[1] for key in self.config_dict if key.startswith('parameters.')]
+        self.parameter_var = tk.StringVar(self)
+        self.combobox = ttk.Combobox(param_frm, textvariable=self.parameter_var, values=self.get_parameters, state="readonly")
+        self.combobox.pack(fill='x', padx=5, pady=5)
+        if self.get_parameters:
+            self.parameter_var.set(self.get_parameters[0])
+            self.combobox.current(0)
+        self.combobox.bind("<<ComboboxSelected>>", self.on_parameter_change)
+        self.combobox.bind("<Return>", self.on_parameter_change)
+        self.curr_param_frame = tk.Frame(param_frm)
+        self.curr_param_frame.pack(fill='x', padx=10, pady=5)
+        self.fill_current_param()
+
+    def on_parameter_change(self, event=None):
+        self.fill_current_param()
+
+    def get_param_value(self, key, default=""):
+        """Get the parameter value from the config_dict."""
+        current_param = self.parameter_var.get()
+        param_key = f'parameters.{current_param}'
+        return self.config_dict[param_key].get(key)
+
+    def set_param_value(self, key, value):
+        """Set the parameter value in the config_dict."""
+        current_param = self.parameter_var.get()
+        param_key = f'parameters.{current_param}'
+        self.config_dict.setdefault(param_key, {})[key] = value
+
+    def create_labeled_entry(self, parent, label_text, var, **entry_kwargs):
+        """Create a labeled entry widget."""
+        row = tk.Frame(parent)
+        row.pack(fill='x', pady=2)
+        tk.Label(row, text=label_text).pack(side='left', padx=5)
+        entry = tk.Entry(row, textvariable=var, **entry_kwargs)
+        entry.pack(side='right', fill='x', expand=True, padx=5)
+        return row
+
+    def get_all_membershipfunction_names(self):
+        all_pairs = []
+        directory = os.path.join(self.config_dict['files'].get('plant_param_dir', 'plant_params'), 'available')
+        for filename in os.listdir(directory):
+            if filename.endswith('.inf'):
+                with open(os.path.join(directory, filename), 'r') as file:
+                    try:
+                        file_content = file.read()
+                        pairs = []
+                        lines = file_content.split('\n')
+                        for line in lines:
+                            if '_vals' in line:
+                                key = line.split('=')[0].strip()
+                                suit_key = key.replace('_vals', '_suit')
+                                if any(suit_key in l for l in lines):
+                                    if key[:-5] not in all_pairs:
+                                        all_pairs.append(key[:-5])
+                    except:
+                        pass
+        return all_pairs
+
+    def fill_current_param(self):
+        """Fill the current parameter frame with widgets based on the current parameter."""
+        
+        def get_param_value(key, default=""):
+            """Get the parameter value from the config_dict."""
+            current_param = self.parameter_var.get()
+            param_key = f'parameters.{current_param}'
+            return self.config_dict.get(param_key, {}).get(key, default)
+
+        def set_param_value(key, value):
+            """Set the parameter value in the config_dict."""
+            current_param = self.parameter_var.get()
+            param_key = f'parameters.{current_param}'
+            self.config_dict.setdefault(param_key, {})[key] = value
+
+        def create_labeled_entry(parent, label_text, var, **entry_kwargs):
+            """Create a labeled entry widget."""
+            row = tk.Frame(parent)
+            row.pack(fill='x', pady=2)
+            tk.Label(row, text=label_text).pack(side='left', padx=5)
+            entry = tk.Entry(row, textvariable=var, **entry_kwargs)
+            entry.pack(side='right', fill='x', expand=True, padx=5)
+            return row
+        
+        # === Prepare ===
+        for widget in self.curr_param_frame.winfo_children():
+            widget.destroy()
+
+        current_param = self.parameter_var.get()
+        param_key = f'parameters.{current_param}'
+
+        # === Path Selection ===
+        path_frame = tk.Frame(self.curr_param_frame)
+        path_frame.pack(fill='x', pady=5)
+
+        tk.Label(path_frame, text="Path:").pack(side="left", padx=(5, 2))
+
+        self.path_var = tk.StringVar(master=self.curr_param_frame, value=get_param_value('data_directory'))
+        tk.Entry(path_frame, textvariable=self.path_var).pack(side="left", fill='x', expand=True, padx=(0, 5))
+        tk.Button(path_frame, text="Select", command=lambda: self.path_var.set(filedialog.askdirectory())).pack(side="right", padx=5)
+        self.path_var.trace_add("write", lambda *_: set_param_value('data_directory', self.path_var.get()))
+
+        # === Weighting Method ===
+        self.weight_vars = []
+        weighting_frame = tk.Frame(self.curr_param_frame)
+        weighting_frame.pack(fill='x', pady=5)
+
+        tk.Label(weighting_frame, text="Weighting Method:").pack(side="left", padx=(5, 2))
+
+        method_options = {
+            "0": "First Layer only",
+            "1": "Top Soil/First Three Layers",
+            "2": "All six Soil Layers"
+        }
+        reverse_method_options = {v.lower(): k for k, v in method_options.items()}
+
+        method_code = get_param_value('weighting_method', '0')
+        self.method_var = tk.StringVar(master=self.curr_param_frame, value=method_options.get(method_code, "First Layer only"))
+        self.method_combobox = ttk.Combobox(
+            weighting_frame,
+            textvariable=self.method_var,
+            values=list(method_options.values()),
+            state="readonly",
+            width=30
+        )
+        self.method_combobox.pack(side="right", padx=5)
+        
+        # === Weighting Factors Section ===
+        self.weights_frame = tk.Frame(self.curr_param_frame)
+        self.weights_frame.pack(fill='x', pady=(10, 5))
+
+        def show_layer_weights(*_):
+            layer_labels = [
+                "Weighting Factor 0 - 25 cm",
+                "Weighting Factor 25 - 50 cm",
+                "Weighting Factor 50 - 75 cm",
+                "Weighting Factor 75 - 100 cm",
+                "Weighting Factor 100 - 125 cm",
+                "Weighting Factor 125 - 200 cm"
+            ]
+
+            for widget in self.weights_frame.winfo_children():
+                widget.destroy()
+            method_code = int(reverse_method_options[self.method_var.get().lower()])
+            if method_code == 2:
+                stored_weights = get_param_value('weighting_factors', '2.0,1.5,1.0,0.75,0.5,0.25').split(',')                
+                for i, label_text in enumerate(layer_labels):
+                    var = tk.StringVar(master=self.curr_param_frame, value=stored_weights[i] if i < len(stored_weights) else '0.0')
+                    create_labeled_entry(self.weights_frame, label_text, var)
+                    self.weight_vars.append(var)
+
+                    def update_weights(*_):
+                        set_param_value('weighting_factors', ','.join(v.get() for v in self.weight_vars))
+                    set_param_value('weighting_method', '2')
+                    var.trace_add("write", update_weights)
+            elif method_code == 1:
+                set_param_value('weighting_method', '1')
+                set_param_value('weighting_factors', '1.0,1.0,1.0,0.0,0.0,0.0')
+            else:
+                set_param_value('weighting_method', '0')
+                set_param_value('weighting_factors', '1.0,0.0,0.0,0.0,0.0,0.0')
+
+        self.method_combobox.bind("<<ComboboxSelected>>", show_layer_weights)
+        self.method_combobox.bind("<Return>", show_layer_weights)
+        show_layer_weights()
+
+        # === Conversion Factor ===
+        conv_frame = tk.Frame(self.curr_param_frame)
+        conv_frame.pack(fill='x', pady=5)
+
+        tk.Label(conv_frame, text="Conversion Factor:").pack(side="left", padx=(5, 2))
+        self.conv_var = tk.StringVar(master=self.curr_param_frame, value=get_param_value('conversion_factor'))
+        tk.Entry(conv_frame, textvariable=self.conv_var, width=30).pack(side="right", padx=(0, 5))
+        self.conv_var.trace_add("write", lambda *_: set_param_value('conversion_factor', self.conv_var.get()))
+
+        # === Interpolation Method ===
+        interp_frame = tk.Frame(self.curr_param_frame)
+        interp_frame.pack(fill='x', pady=5)
+
+        tk.Label(interp_frame, text="Interpolation Method:").pack(side="left", padx=(5, 2))
+        self.conv_var = tk.StringVar(master=self.curr_param_frame, value=get_param_value('interpolation_method'))
+
+        interp_methods = {0: 'Linear', 1: 'Cubic', 2: 'Quadratic', 3: 'Spline', 4: 'Poly', 5: 'sLinear'}
+        interp_values = list(interp_methods.values())
+        self.conv_var = tk.StringVar(master=self.curr_param_frame, value=interp_methods.get(int(get_param_value('interpolation_method')), 'Linear'))
+        interp_combobox = ttk.Combobox(interp_frame, textvariable=self.conv_var, values=interp_values, state="readonly", width=30)
+        interp_combobox.pack(side="right", padx=(2, 5))
+        
+        def on_interpmethod_change(event=None):
+            selected_method = interp_combobox.get()
+            method_code = next((k for k, v in interp_methods.items() if v.lower() == selected_method.lower()), None)
+            if method_code is not None:
+                set_param_value('interpolation_method', str(method_code))
+
+        interp_combobox.bind("<<ComboboxSelected>>", on_interpmethod_change)
+        interp_combobox.bind("<Return>", on_interpmethod_change)
+        
+        # === Relating Membership Functions ===
+        available_mfs = self.get_all_membershipfunction_names()
+        mfs_frame = tk.Frame(self.curr_param_frame)
+        mfs_frame.pack(fill='x', pady=5)
+
+        tk.Label(mfs_frame, text="Corresponding Membership Function:").pack(side="left", padx=(5, 2))
+        self.mfs_var = tk.StringVar(master=self.curr_param_frame, value=get_param_value('rel_member_func'))
+        mfs_combobox = ttk.Combobox(mfs_frame, textvariable=self.mfs_var, values=available_mfs, state="readonly", width=30)
+        mfs_combobox.pack(side="right", padx=(2, 5))   
+
+        def on_mfs_change(event=None):
+            selected_mfs = mfs_combobox.get()
+            if selected_mfs in available_mfs:
+                set_param_value('rel_member_func', selected_mfs)
+
+        mfs_combobox.bind("<<ComboboxSelected>>", on_mfs_change)
+        mfs_combobox.bind("<Return>", on_mfs_change)
+
+        but_frm = tk.Frame(self.curr_param_frame)
+        but_frm.pack(fill='x', pady=5)
+
+        tk.Button(but_frm, text='Add new Parameter', command=self.add_param).pack(side='left', padx=5)
+        tk.Button(but_frm, text='Remove selected Parameter', command=self.rem_param).pack(side='left', padx=5)
+
+    #pgi.ParamGUI(self.config_ini_path, parent_frame=param_frm)
+
+    def add_param(self):
+        new_name = self.add_name('Add Parameter Name')
+        self.config_dict[f'parameters.{new_name}'] = {
+            'data_directory': '.',
+            'weighting_method': '0',
+            'weighting_factors': '1.0,0.0,0.0,0.0,0.0,0.0',
+            'rel_member_func': 'None',
+            'conversion_factor': 1.0,
+            'interpolation_method': '0',
+        }
+        self.get_parameters.append(new_name)
+        self.parameter_var.set(new_name)
+        self.fill_current_param()
+           
+    def rem_param(self):
+        curr_param = self.parameter_var.get()
+        param_key = f'parameters.{curr_param}'
+        if param_key in self.config_dict:
+            del self.config_dict[param_key]
+        self.parameter_var.set(self.get_parameters[0] if self.get_parameters else '')
+        self.fill_current_param()
+
+    def add_name(self, label):
+        name_win = tk.Tk()
+        name_win.title(label)
+        name_win.resizable(0, 0) #type:ignore
+        name_win.focus_force()
+        x, y = 200, 80
+        name_win.geometry(f'{x}x{y}+{(name_win.winfo_screenwidth() - x) // 2}+{(name_win.winfo_screenheight() - y) // 2}')
+        frm = tk.Frame(name_win)
+        frm.pack(anchor='w', padx=5, pady=5, fill='x')
+        val = tk.StringVar(name_win, '')
+        lab = tk.Label(frm, text=f'{label}: ')
+        ent = tk.Entry(frm, textvariable=val, width=25)
+        lab.pack(side='left')
+        ent.pack(side='right')
+        def ret_val():
+            global vl
+            vl = val.get()
+            name_win.destroy()
+            return(vl)
+        tk.Button(name_win, text='Ok', command=ret_val).pack(pady=5,fill='x')
+        name_win.wait_window(name_win)
+        return vl
 
     ### CLIMATE ###
     def fill_clim_tab(self):
@@ -497,5 +761,5 @@ class ConfigGUI(tk.Tk):
 
 if __name__ == "__main__":
     #pass
-    app = ConfigGUI(os.path.join('U:\\Source Code\\CropSuite\\config.ini'))
-    app.mainloop()
+    ConfigGUI(os.path.join('U:\\Source Code\\CropSuite\\config.ini'))
+    #app.mainloop()

@@ -47,7 +47,7 @@ from src import plant_param_gui
 from src import config_gui as cfg
 warnings.filterwarnings('ignore')
 
-version = '1.3.0'
+version = '1.3.1'
 date = '2025-04-17'
 current_cfg = ''
 
