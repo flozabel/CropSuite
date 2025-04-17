@@ -3,6 +3,7 @@ import os
 import rasterio
 import xarray as xr
 from rasterio.transform import from_bounds
+from rasterio.windows import Window
 import glob
 from psutil import virtual_memory
 from concurrent.futures import ProcessPoolExecutor
@@ -21,6 +22,26 @@ try:
 except:
     from src import nc_tools as nc
 from scipy.ndimage import zoom
+from collections import namedtuple
+
+
+def get_extent(filepath):
+    BoundingBox = namedtuple("BoundingBox", ["left", "bottom", "right", "top"])
+    if filepath.endswith((".tif", ".tiff")):
+        with rasterio.open(filepath, 'r') as src:
+            left, bottom, right, top = src.bounds
+    elif filepath.endswith((".nc", ".nc4")):
+        with xr.open_dataset(filepath) as ds:
+            lon = ds.coords.get("lon", ds.coords.get("longitude", None))
+            lat = ds.coords.get("lat", ds.coords.get("latitude", None))
+            if lon is None or lat is None:
+                raise ValueError("Longitude and Latitude coordinates not found.")
+            left, right = float(lon.min()), float(lon.max())
+            bottom, top = float(lat.min()), float(lat.max())
+    else:
+        raise ValueError("Unsupported file format.")
+
+    return BoundingBox(left, bottom, right, top)
 
 def get_npy_file_shape(file_path) -> list:
     """
@@ -551,7 +572,7 @@ def resize_viewer_data(array, new_shape, nodata):
 
 
 
-def resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999)):
+def resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999), method='linear'):
     """
     Resizes a 2D array to the specified new shape using linear interpolation.
 
@@ -575,7 +596,7 @@ def resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999)):
     interp_func = RegularGridInterpolator(
         (np.arange(h), np.arange(w)),
         array,
-        method='linear'
+        method=method
     )
 
     # Define the target points for the new shape
@@ -591,7 +612,60 @@ def resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999)):
         nanmask = interpolate_nanmask(nanmask, new_shape) # type: ignore
         ret += np.where(nanmask, np.nan, 0.0)
     return ret, None if not nodata else np.nan
+'''
 
+def resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999)):
+    """
+    Resizes a 2D array to the specified new shape using skimage's resize function.
+
+    Parameters:
+    - array (np.ndarray): 2D array to be resized.
+    - new_shape (tuple): Tuple representing the target shape (dimensions) in the format (rows, columns).
+    - nodata (float, optional): Value representing no-data (NaN) in the array.
+    - limit (tuple, optional): Tuple containing the lower and upper limits for the resized array values. Default is (-9999, -9999).
+
+    Returns:
+    - resized_array (np.ndarray): Resized array with the specified new shape using linear interpolation.
+    - nodata (float or None): Returns None if nodata is not used, otherwise returns np.nan.
+
+    Note: Values outside the specified limits are set to 0 if limits are provided.
+    """
+    if nodata is not None:
+        array, nanmask = fill_nan_nearest(array, nodata, return_nanmask=True)
+
+    # Resize the array using skimage's resize (linear interpolation by default)
+    # resized_array = skt.resize(array, new_shape, order=1, mode='edge', anti_aliasing=False)
+
+    h, w = array.shape
+
+    # Create an interpolating function using RegularGridInterpolator
+    interp_func = RegularGridInterpolator(
+        (np.arange(h), np.arange(w)),
+        array,
+        method='linear'
+    )
+
+    # Define the target points for the new shape
+    target_x = np.linspace(0, h - 1, int(new_shape[0]))
+    target_y = np.linspace(0, w - 1, int(new_shape[1]))
+    target_points = np.array(np.meshgrid(target_x, target_y, indexing='ij')).reshape(2, -1).T
+
+    # Interpolate to get the resized array
+    resized_array = interp_func(target_points).reshape(int(new_shape[0]), int(new_shape[1]))
+
+    # Apply limits
+    if limit[0] != -9999:
+        resized_array[resized_array <= -limit[0]] = 0
+    if limit[1] != -9999:
+        resized_array[resized_array >= limit[1]] = 0
+
+    # Restore NaN mask if nodata was provided
+    if nodata is not None:
+        nanmask = skt.resize(nanmask.astype(float), new_shape, order=0, mode='reflect') > 0.5  # Nearest-neighbor resize
+        resized_array[nanmask] = np.nan
+
+    return resized_array, None if nodata is None else np.nan
+'''
 
 def remove_residuals(fine_data, coarse_data, threshold=0.0005, iterations=10):
     residuals_coarse = resize_array_mean(fine_data, coarse_data.shape) - coarse_data # Coarse Resolution
@@ -1013,6 +1087,72 @@ def write_geotiff(filepath, filename, array, extent, crs='+proj=longlat +datum=W
         create_cog_from_geotiff(output_path, output_path.replace('.tif', '_cog.tif'))
 
 
+def geotiff_to_smallest_datatype(geotiff_list):
+    min_val, max_val = 0, 0
+    for input_file in geotiff_list:
+        with rasterio.open(input_file, 'r') as src:
+            data = src.read()
+            min_val = np.min([min_val, np.min(data)])
+            max_val = np.max([max_val, np.max(data)])
+            if min_val > src.nodata:
+                min_val = src.nodata
+            src.close()
+    if min_val >= -128 and max_val <= 128:
+        dtype = np.int8
+    elif min_val >= 0 and max_val <= 255:
+        dtype = np.uint8
+    elif min_val >= 0 and max_val <= 65535:
+        dtype = np.uint16
+    elif min_val >= -32768 and max_val <= 32767:
+        dtype = np.int16
+    elif min_val >= 0 and max_val <= 4294967295:
+        dtype = np.uint32
+    elif min_val >= -2147483648 and max_val <= 2147483647:
+        dtype = np.int32
+    else:
+        dtype = np.float32
+    print(f' -> Using {dtype} for {os.path.basename(geotiff_list[0])}')
+    for input_file in geotiff_list:
+        if not os.path.exists(input_file):
+            continue
+
+        temp_file = 'temp.tif'
+        with rasterio.open(input_file) as src:
+            data = src.read()
+            meta = src.meta.copy()
+            data_converted = data.astype(dtype)
+            meta.update({'dtype': np.dtype(dtype).name})
+        
+        with rasterio.open(temp_file, 'w', **meta) as dst:
+            dst.write(data_converted)
+        shutil.move(temp_file, input_file)
+
+        """
+        with rasterio.open(input_file, "r+") as src:
+            data = src.read()
+            min_val, max_val = np.min(data), np.max(data)
+            if min_val >= -128 and max_val <= 128:
+                dtype = np.int8
+            elif min_val >= 0 and max_val <= 255:
+                dtype = np.uint8
+            elif min_val >= 0 and max_val <= 65535:
+                dtype = np.uint16
+            elif min_val >= -32768 and max_val <= 32767:
+                dtype = np.int16
+            elif min_val >= 0 and max_val <= 4294967295:
+                dtype = np.uint32
+            elif min_val >= -2147483648 and max_val <= 2147483647:
+                dtype = np.int32
+            else:
+                dtype = np.float32
+            data = data.astype(dtype)
+            try:
+                src.dtype = [np.dtype(dtype).name] * src.count
+            except:
+                src.dtypes = [np.dtype(dtype).name] * src.count
+            src.write(data)
+        """
+
 def merge_geotiffs_to_multiband(geotiff_files, output_file):
     with rasterio.open(geotiff_files[0]) as src0:
         meta = src0.meta
@@ -1044,6 +1184,8 @@ def extent_is_covered_by_second_extent(A, B):
         A: Big Extent
         B: Small Extent
     """
+    A = [round(x, 2) for x in A]
+    B = [round(x, 2) for x in B]
     return A[0] >= B[0] and A[1] >= B[1] and A[2] <= B[2] and A[3] <= B[3]
 
 
@@ -1115,7 +1257,10 @@ def load_specified_lines(filepath, extent, all_bands = True):
     else:
         with rasterio.open(filepath, 'r') as src:
             window = src.window(x_min, y_min, x_max, y_max)
-            window = window.round_offsets()
+            try:
+                window = Window(window.col_off, np.round(window.row_off), window.width, np.round(window.height)) #type:ignore
+            except:
+                pass
             if isinstance(all_bands, bool):
                 if all_bands:
                     if src.count == 1:
@@ -1388,6 +1533,47 @@ def split_area_into_rows(extent, num_rows, overlap=0):
         return extents
 
 
+def get_resolution_array(config_dictionary, extent, only_shape=False, climate=False):
+    resolution_value = int(config_dictionary['options'].get('resolution', 5))
+    if climate:
+        resolution_value = np.min([resolution_value, 5])
+    resolution_dict = {0: 0.5, 1: 0.25, 2: 0.1, 3: 0.08333333333333, 4: 0.041666666666666, 5: 0.008333333333333, 6: 0.00208333333333333}
+
+    try:
+        y_max, y_min = float(extent.get('top')), float(extent.get('bottom'))
+        x_max, x_min = float(extent.get('right')), float(extent.get('left'))
+    except:
+        y_max, y_min = np.max([extent[0], extent[2]]), np.min([extent[0], extent[2]])
+        x_max, x_min = np.max([extent[1], extent[3]]), np.min([extent[1], extent[3]])
+
+    resolution = resolution_dict.get(resolution_value, 0.00833333333333)
+
+    px_y = (y_max - y_min) / resolution
+    px_x = (x_max - x_min) / resolution
+
+    if (px_y - int(px_y)) >= 0.5:
+        px_y = int(px_y) + 1
+    else:
+        px_y = int(px_y)
+
+    if (px_x - int(px_x)) >= 0.5:
+        px_x = int(px_x) + 1
+    else:
+        px_x = int(px_x)
+
+    if only_shape:
+        return (px_y, px_x)
+    else:
+        return np.empty((px_y, px_x))
+
+def resize_nearest_bool(array, final_shape, true_value = 1):
+    new_array = np.empty(final_shape, dtype=array.dtype)
+    y_res = new_array.shape[0] // array.shape[0]
+    x_res = new_array.shape[1] // array.shape[1]
+    if new_array.shape > array.shape:
+        for y in array.shape[0]:
+            for x in array.shape[1]:
+                new_array[y*y_res:(y+1)*y_res, x*x_res:(x+1)*x_res] = array[y, x]
 
 if __name__ == '__main__':
     pass

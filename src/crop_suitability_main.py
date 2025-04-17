@@ -1,5 +1,4 @@
-from scipy.interpolate import interp1d, interp2d, CubicSpline, PPoly
-from scipy.ndimage import zoom
+from scipy.interpolate import interp1d, CubicSpline, PPoly
 from rasterio.transform import from_bounds
 import os
 import numpy as np
@@ -147,42 +146,20 @@ def interpolate_nanmask(array, new_shape):
 
 
 def resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999), method='linear'):
-    """
-    Resizes a 2D array to the specified new shape using linear interpolation.
-
-    Parameters:
-    - array (np.ndarray): 2D array to be resized.
-    - new_shape (tuple): Tuple representing the target shape (dimensions) in the format (rows, columns).
-    - limit (tuple, optional): Tuple containing the lower and upper limits for the resized array values. Default is (-9999, -9999).
-
-    Returns:
-    - resized_array (np.ndarray): Resized array with the specified new shape using linear interpolation.
-
-    Note: The function uses linear interpolation to resize the input array to the new shape.
-    Values outside the specified limits are set to 0 if limits are provided.
-    """
-    """
-    if not nodata is None:
-        array, nanmask = fill_nodata_nearest(array, nodata)
-
-    h, w = array.shape
-
     if method == 'nearest':
-        zoom_factors = (new_shape[0] / h, new_shape[1] / w)
-        ret = zoom(array, zoom_factors, order=0).astype(float)
+        old_rows, old_cols = array.shape
+        new_rows, new_cols = new_shape
+        row_indices = np.clip(np.floor(np.arange(new_rows) * old_rows / new_rows).astype(int), 0, old_rows - 1)
+        col_indices = np.clip(np.floor(np.arange(new_cols) * old_cols / new_cols).astype(int), 0, old_cols - 1)
+        return array[np.ix_(row_indices, col_indices)], None if not nodata else nodata
+    elif method == 'linear':
+        old_rows, old_cols = array.shape
+        new_rows, new_cols = new_shape
+        row_indices = np.linspace(0, old_rows - 1, new_rows).astype(int)
+        col_indices = np.linspace(0, old_cols - 1, new_cols).astype(int)
+        return array[np.ix_(row_indices, col_indices)], None if not nodata else nodata
     else:
-        interp_func = interp2d(np.arange(w), np.arange(h), array, kind='linear')
-        ret = interp_func(np.linspace(0, w - 1, int(new_shape[1])), np.linspace(0, h - 1, int(new_shape[0])))
-    if limit[0] != -9999: ret[ret<=-limit[0]] = 0
-    if limit[1] != -9999: ret[ret>=limit[1]] = 0
-
-    if not nodata is None:
-        nanmask = interpolate_nanmask(nanmask, new_shape) # type: ignore
-        ret += np.where(nanmask, np.nan, 0.0)
-    return ret, None if not nodata else np.nan
-    """
-
-    return dt.resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999))
+        return dt.resize_array_interp(array, new_shape, nodata=None, limit=(-9999, -9999))
 
 
 def get_suitability_val(forms, plant_id, form_type, value):
@@ -241,9 +218,11 @@ def get_suitability_val_dict(forms, plant, form_type, value):
         value = np.clip(value, min_val, max_val)
         value[value >= max_val] = max_val
         value[value <= min_val] = min_val
+
         try:
             value = np.clip(func(value), 0, 1)
-        except:
+        except Exception as e:
+            print('Error in suitability function application:', str(e))
             value = np.full_like(value, 1)
         value[nanmask] = -0.01
         return value
@@ -445,11 +424,6 @@ def get_soil_data(climate_config, current_parameter, domain, shape, itype):
     weighting_factors = np.asarray(str(current_dict['weighting_factors']).split(',')).astype(float)
     conversion_factor = float(current_dict['conversion_factor'])
 
-    try:
-        no_data = float(current_dict['no_data'])
-    except:
-        no_data = False
-
     param_datasets = []
 
     if os.path.isdir(data_dir):
@@ -467,8 +441,9 @@ def get_soil_data(climate_config, current_parameter, domain, shape, itype):
     param_datasets = [os.path.join(data_dir, param_datasets[i]) for i in range(len(param_datasets))]
 
     dataset, no_data = aggregate_soil_raster_lst(param_datasets, domain, shape, weighting_method, conversion_factor, weighting_factors)
-    if no_data and np.issubdtype(dataset.dtype, np.floating):
-        dataset[dataset<0] = np.nan
+    if no_data:
+        if not np.issubdtype(dataset.dtype, np.floating):
+            dataset = dataset.astype(np.float32)
         dataset[dataset == no_data] = np.nan 
     return dataset.astype(itype)
 
@@ -529,23 +504,31 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
     - The function returns a tuple containing the aggregated soil data array and the nodata value.
     """
     nodata = None
-    output_tif = False
+    
     if weighting_method == 0:
         layer, nodata = dt.load_specified_lines(file_list[0], [domain[1], domain[0], domain[3], domain[2]], all_bands=False) #type:ignore
         if layer.shape != final_shape:
             layer, nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
+        nan_mask = layer == nodata
+        layer = layer / conversion_factor
+        layer[nan_mask] = nodata #type:ignore
+        return layer, nodata
 
-        return layer / conversion_factor, nodata  # type: ignore
     elif weighting_method == 1:
         layers = []
         for layer_file in file_list:
             layer, nodata = dt.load_specified_lines(layer_file, [domain[1], domain[0], domain[3], domain[2]], all_bands=False)
             layers.append(layer)
+        nan_mask = layers[0] == nodata
         mean = np.nanmean(layers, axis=0)
+        mean[nan_mask] = nodata
         if mean.shape != final_shape:
+            nan_mask = dt.interpolate_nanmask(nan_mask, final_shape)
             mean, nodata = resize_array_interp(mean, final_shape, nodata=nodata, method='nearest')
 
-        return mean / conversion_factor, nodata  # type: ignore
+        new_file = mean / conversion_factor
+        new_file[nan_mask] = nodata  #type:ignore
+        return new_file, nodata
 
     elif weighting_method == 2:
         layers = []
@@ -556,6 +539,8 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
         for idx, layer in enumerate(layers):
             if layer.shape != final_shape:
                 layers[idx], nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
+
+        nan_mask = layers[0] == nodata
 
         new_file = np.zeros((layers[0].shape))
         new_file = new_file.astype(float)
@@ -569,8 +554,9 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
         new_file += layers[4] * 25 * weighting[3] # 75-100
         new_file += layers[5] * 25 * weighting[4] # 100-125
         new_file += layers[5] * 25 * weighting[5] # 125-150
-        
-        return new_file / 150 / conversion_factor, nodata  # type: ignore
+        new_file = new_file / 150 / conversion_factor  # type: ignore
+        new_file[nan_mask] = nodata
+        return new_file, nodata
         
     else:
         throw_exit_error('Unkown Weighting Method')
@@ -683,7 +669,7 @@ def calculate_slope(dem_path, output_shape, extent):
         cell_size = ((extent[2] - extent[0]) / output_shape[1])
         domain = [extent[1], extent[0], extent[3], extent[2]]
         dem_array = dt.load_specified_lines(dem_path, domain)[0][0]
-        dem_array = dem_array[:output_shape[0], :output_shape[1]]
+        dem_array, _ = dt.resize_array_interp(dem_array, output_shape)
     R = 6371000
     resolution_rad = np.deg2rad(cell_size)
     resolution_m = R * resolution_rad
@@ -722,7 +708,7 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
     plant_list = [plant for plant in plant_params]
     if os.path.exists(os.path.join(results_path, plant_list[-1], 'crop_suitability.tif')):
         return
-    #suitability = np.zeros((clim_suit.shape[0], clim_suit.shape[1], len(plant_list)), dtype=np.float16)
+
     parameter_list = [entry.replace('parameters.', '', 1) if entry.startswith('parameters.') else entry for entry in get_id_list_start(config, 'parameters.')] + ['slope']
     parameter_array = np.empty((clim_suit.shape[0], clim_suit.shape[1], len(parameter_list)), dtype=np.float16)
     parameter_dictionary = {parameter_list[parameter_id]: config[f'parameters.{parameter_list[parameter_id]}']['rel_member_func'] for parameter_id in range(len(parameter_list)) if f'parameters.{parameter_list[parameter_id]}' in config}
@@ -745,6 +731,51 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
     if config['options'].get('output_soil_data', 0) == 1:
         output_param_data(parameter_array, parameter_list, results_path, domain[:4])
 
+    ##### CALCIFICATION #####
+    if int(config['options'].get('simulate_calcification', '0')) > 0:
+        calcification_val = int(config['options'].get('simulate_calcification', '0'))
+        ph_index = parameter_list.index('pH')
+        if calcification_val == 1:
+            calcification = 0.5
+        elif calcification_val == 2:
+            calcification = 1.0
+        else:
+            calcification = 1.5
+        
+        ph_data = parameter_array[..., ph_index]
+        ph_gap = 6.5 - ph_data
+        ph_add = np.clip(ph_gap, 0, calcification)
+        parameter_array[..., ph_index] += ph_add
+
+        top, left, bottom, right = extent
+        height, width = ph_add.shape
+        transform = from_bounds(left, bottom, right, top, width, height)
+        with rasterio.open(os.path.join(results_path, 'ph_increase.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.int8,
+                            crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+            dst.write((ph_add * 10.).astype(np.int8), 1)
+
+        ph_write = parameter_array[..., ph_index].copy()
+        ph_write[ph_write <= 0] = -.1
+        ph_write = (ph_write * 10).astype(np.int8)
+        with rasterio.open(os.path.join(results_path, 'ph_after_liming.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.int8,
+                            crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+            dst.write(ph_write, 1)
+        del ph_write
+
+        texture_index = parameter_list.index('texture')
+        texture_class = parameter_array[..., texture_index].astype(np.int8)
+
+        # t CaCo3 / ha / 0.1 pH
+        texture_caco3_dict = {1: 2.0, 2: 1.75, 3: 1.85, 4: 1.5, 5: 1.5, 6: 1.2,
+                              7: 1.05, 8: 1.2, 9: 0.9, 10: 0.75, 11: 0.6, 12: 0.45, 13: 0.375}
+        keys = np.array(list(texture_caco3_dict.keys()))
+        lut = np.zeros(keys.max() + 1)
+        lut[keys] = np.array(list(texture_caco3_dict.values()))
+        caco_array = lut[texture_class] * ph_add * 10
+        with rasterio.open(os.path.join(results_path, 'lime_application.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
+                            crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+            dst.write(caco_array, 1)
+
     formulas = [plant for plant in plant_formulas[plant_list[0]]]
     formulas = dict(zip(formulas, np.arange(0, len(formulas))))
 
@@ -757,7 +788,7 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
         os.makedirs(res_path, exist_ok=True)
         if os.path.exists(os.path.join(res_path, 'crop_suitability.tif')):
             continue
-        #plant_idx = plant_list.index(plant)
+        
         suitability_array = np.empty((clim_suit.shape[0], clim_suit.shape[1], len(parameter_list)), dtype=np.float16)        
 
         max_ind_val_climate = 3
@@ -812,6 +843,8 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
         else:
             print('No output format specified.')
 
-        del suitability_array, suitability, soil_suitablility, clim_lims, nan_mask, min_indices, curr_climsuit
-
+        try:
+            del suitability_array, suitability, soil_suitablility, clim_lims, nan_mask, min_indices, curr_climsuit
+        except:
+            pass
     print('\nSuitability data created')

@@ -2,7 +2,7 @@ import os
 from matplotlib import pyplot as plt
 import numpy as np
 import math
-from scipy.interpolate import interp1d, CubicSpline, PPoly
+from scipy.interpolate import interp1d, CubicSpline, PPoly, BarycentricInterpolator, Akima1DInterpolator
 import sys
 
 def get_crops_from_dict(plant_params):
@@ -38,11 +38,11 @@ def plot_plant_params(form_arr, crop, sz = 12, no_stops = 50, no_cols = 4, len_g
         if param in unit_dict:
             plt.xlabel(unit_dict[param], fontsize='small')
         plt.grid()
-    fig.tight_layout(pad=0.75)
+    fig.tight_layout(pad=0.75) #type:ignore
     if not os.path.exists(os.path.join(os.getcwd(), 'parameterization_plots')):
         os.mkdir(os.path.join(os.getcwd(), 'parameterization_plots'))
     plt.close()
-    fig.savefig(os.path.join(os.getcwd(), 'parameterization_plots', str(crop)+'.png'), dpi=150)
+    fig.savefig(os.path.join(os.getcwd(), 'parameterization_plots', str(crop)+'.png'), dpi=150) #type:ignore
 
 def plot_plant_params_mult(form_arr, no_stops=50, sz=12, no_cols = 4):
     fig = plt.figure(figsize=(sz, sz*5/6))
@@ -71,17 +71,17 @@ def plot_plant_params_mult(form_arr, no_stops=50, sz=12, no_cols = 4):
             plt.title(params_dict[param], fontsize='small', loc='left')
         else:
             plt.title(param.captialize(), fontsize='small', loc='left')
-        plt.ylabel('Suitability [%]', fontsize='small')
+        plt.ylabel('Suitability', fontsize='small')
         plt.xticks(fontsize='small')
         plt.yticks(np.linspace(0, 100, 11), fontsize='small')
         if param in unit_dict:
             plt.xlabel(unit_dict[param], fontsize='small')
         plt.grid()
-    fig.tight_layout(pad=0.75)
+    fig.tight_layout(pad=0.75) #type:ignore
     if not os.path.exists(os.path.join(os.getcwd(), 'parameterization_plots')):
         os.mkdir(os.path.join(os.getcwd(), 'parameterization_plots'))
     plt.close()
-    fig.savefig(os.path.join(os.getcwd(), 'parameterization_plots', 'overview.png'), dpi=150)
+    fig.savefig(os.path.join(os.getcwd(), 'parameterization_plots', 'overview.png'), dpi=150) #type:ignore
 
 def plot_all_parameterizations(form_arr, crop_dict):
     for crop in crop_dict:
@@ -108,10 +108,13 @@ def get_formula(x_vals, y_vals, method):
                 and the maximum value of x_vals. If an error occurs during the interpolation process, a linear interpolation
                 formula is returned instead.
     """
+    """
     if len(x_vals) > 3:
         try:
             if method == 0:  
-                return [interp1d(x_vals, y_vals, kind='linear'), min(x_vals), max(x_vals)]
+                interpolator = lambda xi: np.interp(xi, x_vals, y_vals)
+                return [interpolator, min(x_vals), max(x_vals)]
+                #return [interp1d(x_vals, y_vals, kind='linear'), min(x_vals), max(x_vals)]
             elif method == 4:
                 return [PPoly(x_vals, y_vals), min(x_vals), max(x_vals)]
             elif method == 1:
@@ -125,7 +128,33 @@ def get_formula(x_vals, y_vals, method):
         except:
             return [interp1d(x_vals, y_vals, kind='linear'), min(x_vals), max(x_vals)]
     else:
-        return [interp1d(x_vals, y_vals, kind='linear'), min(x_vals), max(x_vals)]
+        interpolator = lambda xi: np.interp(xi, x_vals, y_vals)
+        return [interpolator, min(x_vals), max(x_vals)]
+        #return [interp1d(x_vals, y_vals, kind='linear'), min(x_vals), max(x_vals)]
+    """
+
+    interpolator = None
+    try:
+        if len(x_vals) <= 3:
+            interpolator = lambda xi: np.interp(xi, x_vals, y_vals)
+        elif method == 0:
+            interpolator = lambda xi: np.interp(xi, x_vals, y_vals)
+        elif method == 1:
+            interpolator = CubicSpline(x_vals, y_vals, bc_type='not-a-knot')
+        elif method == 2:
+            interpolator = BarycentricInterpolator(x_vals, y_vals)
+        elif method == 3:
+            interpolator = CubicSpline(x_vals, y_vals)
+        elif method == 4:
+            interpolator = PPoly(y_vals, x_vals)  # Only if y_vals are coefficients!
+        elif method == 5:
+            interpolator = Akima1DInterpolator(x_vals, y_vals, method="makima")
+        else:
+            interpolator = lambda xi: np.interp(xi, x_vals, y_vals)
+    except Exception:
+        interpolator = lambda xi: np.interp(xi, x_vals, y_vals)
+
+    return [interpolator, min(x_vals), max(x_vals)]
 
 def get_plant_param_interp_forms(plant_params, methods):
     formula_list = []
@@ -224,7 +253,7 @@ def read_crop_parameterizations_files(folder_path, suffix='.inf'):
 
 def read_single_crop_parameterizations_files(filepath, suffix='.inf'):
     data = {}
-    with open(os.path.join(str(filepath).lower()), 'r') as f:
+    with open(os.path.join(str(filepath)), 'r') as f:
         lines = f.readlines()
     section = {}
     section_name = ''

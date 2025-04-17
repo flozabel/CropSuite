@@ -16,47 +16,57 @@ except:
     from src import preproc_tools as pret
     from src import read_climate_ini as rci
 warnings.filterwarnings('ignore')
+import shlex
 
 
 class preproc_gui():
-    def __init__(self, root, config_ini):
+    def __init__(self, root, config_ini, parent=None, config_ini_dict=None):
+        self.parent = parent
         self.root = root
 
-        x, y = 400 if os.name == 'nt' else 600, 850
-        self.root.geometry(f'{x}x{y}+{(self.root.winfo_screenwidth() - x) // 2}+{(self.root.winfo_screenheight() - y) // 2}')
-        self.root.title(f'CropSuite - Preprocessing')
-        self.root.resizable(0, 0) #type:ignore
-        self.root.focus_force()
+        if self.parent:
+            self.root = self.parent
+            root = parent
+        else:
+            x, y = 500 if os.name == 'nt' else 700, 850
+            self.root.geometry(f'{x}x{y}+{(self.root.winfo_screenwidth() - x) // 2}+{(self.root.winfo_screenheight() - y) // 2}')
+            self.root.title(f'CropSuite - Preprocessing')
+            self.root.resizable(0, 1) #type:ignore
+            self.root.focus_force()
 
         title_frm = tk.Frame(root)
         title_frm.pack(fill='x', expand=0)
 
-        self.title = tk.Label(title_frm, text='Preprocessing', font='Helvetica 14')
-        self.title.pack(side='left', padx=5, pady=5)
-        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
+        if not self.parent:
+            self.title = tk.Label(title_frm, text='Preprocessing', font='Helvetica 14')
+            self.title.pack(side='left', padx=5, pady=5)
+            ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
-        self.sel_temp_files_but = tk.Button(root, text='Select Temperature Files', command=self.select_temp_nc_files)
+        files_frm = ttk.LabelFrame(root, text='Climate Data Paths')
+        files_frm.pack(fill='x', padx=10, pady=5)
+
+        self.sel_temp_files_but = tk.Button(files_frm, text='Select Temperature Files', command=self.select_temp_nc_files)
         self.sel_temp_files_but.pack(pady=5, padx=5)
 
-        self.listbox_temp = tk.Listbox(root, height=5, state='disabled')
+        self.listbox_temp = tk.Listbox(files_frm, height=4, state='disabled')
         self.listbox_temp.pack(pady=5, fill='x')
 
-        self.cbx_par_temp_frm = Frame(root)
+        self.cbx_par_temp_frm = Frame(files_frm)
         self.cbx_par_temp_frm.pack(fill='x')
         self.tvar_param_temp = StringVar(root, '')
         self.cbx_par_temp_lab = Label(self.cbx_par_temp_frm, text='Parameter: ').pack(side='left', pady=5, padx=5)
         self.combobox_param_temp = ttk.Combobox(self.cbx_par_temp_frm, textvariable=self.tvar_param_temp)
         self.combobox_param_temp.pack(side='right', pady=5, padx=5, fill='x', expand=True)
         
-        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
+        ttk.Separator(files_frm, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
-        self.sel_prec_files_but = tk.Button(root, text='Select Precipitation Files', command=self.select_prec_nc_files)
+        self.sel_prec_files_but = tk.Button(files_frm, text='Select Precipitation Files', command=self.select_prec_nc_files)
         self.sel_prec_files_but.pack(pady=5, padx=5)
 
-        self.listbox_prec = tk.Listbox(root, height=5, state='disabled')
+        self.listbox_prec = tk.Listbox(files_frm, height=4, state='disabled')
         self.listbox_prec.pack(pady=5, fill='x')
 
-        self.cbx_par_prec_frm = Frame(root)
+        self.cbx_par_prec_frm = Frame(files_frm)
         self.cbx_par_prec_frm.pack(fill='x')
         self.tvar_param_prec = StringVar(root, '')
         self.cbx_par_prec_lab = Label(self.cbx_par_prec_frm, text='Parameter: ').pack(side='left', pady=5, padx=5)
@@ -66,18 +76,21 @@ class preproc_gui():
         self.combobox_param_temp.bind('<<ComboboxSelected>>', self.on_combobox_select)
         self.combobox_param_prec.bind('<<ComboboxSelected>>', self.on_combobox_select)
 
-        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')        
+        #ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')        
 
-        Label(root, text='Time period').pack(padx=5, pady=5)
+        time_frm = ttk.LabelFrame(root, text='Time Period')
+        time_frm.pack(fill='x', padx=10, pady=5)
+
+        #Label(time_frm, text='Time period').pack(side='left', padx=5, pady=5)
 
         self.tp_start_val = IntVar(root)
         self.tp_end_val = IntVar(root)
-        self.tperiod_frm = Frame(root)
-        self.tperiod_frm.pack(fill='x')
-        self.tp_start_lab = Label(self.tperiod_frm, text='Start: ')
-        self.cbox_start = ttk.Combobox(self.tperiod_frm, textvariable=self.tp_start_val, state='disabled')
-        self.tp_end_lab = Label(self.tperiod_frm, text='End: ', width=7)
-        self.cbox_end = ttk.Combobox(self.tperiod_frm, textvariable=self.tp_end_val, state='disabled')
+        #self.tperiod_frm = Frame(root)
+        #self.tperiod_frm.pack(fill='x')
+        self.tp_start_lab = Label(time_frm, text='Start: ')
+        self.cbox_start = ttk.Combobox(time_frm, textvariable=self.tp_start_val, state='disabled')
+        self.tp_end_lab = Label(time_frm, text='End: ', width=7)
+        self.cbox_end = ttk.Combobox(time_frm, textvariable=self.tp_end_val, state='disabled')
 
         self.tp_start_lab.pack(side='left', padx=5, pady=5)
         self.cbox_start.pack(side='left', padx=5, pady=5)
@@ -87,64 +100,104 @@ class preproc_gui():
         self.cbox_start.bind('<<ComboboxSelected>>', self.timeframe_changed)
         self.cbox_end.bind('<<ComboboxSelected>>', self.timeframe_changed)
 
-        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
+        #ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
-        Label(root, text='Processing Extent').pack(padx=5, pady=5)
+        #Label(root, text='Processing Extent').pack(padx=5, pady=5)
+
+        ext_frm = ttk.LabelFrame(root, text='Processing Extent')
+        ext_frm.pack(fill='x', padx=10, pady=5)
 
         self.extent_var = IntVar(root, 0)
-        self.ext_frm = Frame(root)
-        self.ext_frm.pack(fill='x')
-        self.ext_rbut_1 = Radiobutton(self.ext_frm, variable=self.extent_var, value=0, text='Extent specified in config.ini', command=self.radiobutton_change)
-        self.ext_rbut_2 = Radiobutton(self.ext_frm, variable=self.extent_var, value=1, text='Whole World', command=self.radiobutton_change)
+        #self.ext_frm = Frame(root)
+        #self.ext_frm.pack(fill='x')
+        self.ext_rbut_1 = Radiobutton(ext_frm, variable=self.extent_var, value=0, text='Extent specified in config.ini', command=self.radiobutton_change)
+        self.ext_rbut_2 = Radiobutton(ext_frm, variable=self.extent_var, value=1, text='Whole World', command=self.radiobutton_change)
         self.ext_rbut_1.pack(side='left', padx=5, pady=5)
         self.ext_rbut_2.pack(side='right', padx=5, pady=5)
 
-        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
+        # ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
-        Label(root, text='Variability').pack(padx=5, pady=5)
+        var_frm = ttk.LabelFrame(root, text='Climate Variability')
+        var_frm.pack(fill='x', padx=10, pady=5)
+        #Label(root, text='Variability').pack(padx=5, pady=5)
 
         self.cb_var_val = IntVar(root, 1)
-        self.cb_var = Checkbutton(root, variable=self.cb_var_val, text='Create variability files for crops')
+        self.cb_var = Checkbutton(var_frm, variable=self.cb_var_val, text='Create variability files for crops')
         self.cb_var.pack(anchor='w', padx=5, pady=5)
         self.cb_var_val_ds = IntVar(root, 0)
-        self.cb_var_frm = Frame(root, highlightbackground='purple1', highlightthickness=2, bd=0)
+        
+        self.cb_var_frm = Frame(var_frm, highlightbackground='purple1', highlightthickness=2, bd=0)
         self.cb_var_frm.pack(fill='x', padx=5)
         self.cb_var_ds = Checkbutton(self.cb_var_frm, variable=self.cb_var_val_ds,
                                      text='Use downscaled climate data for creation of climate variability files\nCaution:\nThis function is memory-intensive and may take a significant\namount of time to complete and is only recommended for\nsmall areas',
                                      fg='purple1', justify='left', command=self.downs_checked)
         self.cb_var_ds.pack(anchor='w', padx=5, pady=5)
 
-        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
+        #ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
-        config_dict = rci.read_ini_file(config_ini)
+        if config_ini_dict:
+            config_dict = config_ini_dict
+        else:
+            config_dict = rci.read_ini_file(config_ini)
         clim_data_path = config_dict['files'].get('climate_data_dir')
-
-        out_frm = Frame(root)
-        out_frm.pack(fill=tk.X)
-
-        out_ent_val = StringVar(root, clim_data_path)
-        out_lab = Label(out_frm, text='Output Directory: ')
-        out_ent = Entry(out_frm, textvariable=out_ent_val, state='disabled')
-        out_lab.pack(side='left', padx=5, pady=5)
-        out_ent.pack(side='right', pady=5, padx=5, fill='x', expand=True)
+        
+        if not self.parent:
+            out_frm = Frame(root)
+            out_frm.pack(fill=tk.X)
+            self.out_ent_val = StringVar(root, clim_data_path)
+            out_lab = Label(out_frm, text='Output Directory: ')
+            out_ent = Entry(out_frm, textvariable=self.out_ent_val, state='disabled')
+            out_but = Button(out_frm, text='Copy from Files', command=lambda: self.copy_from(config_dict), width=14)
+            out_lab.pack(side='left', padx=5, pady=5)
+            out_but.pack(side='right', pady=5, padx=5)
+            out_ent.pack(side='right', pady=5, padx=5, fill='x', expand=True)
 
         self.button_frame = tk.Frame(root)
         self.button_frame.pack(fill=tk.X)
 
-        cancel_button = tk.Button(self.button_frame, text="Exit", command=self.root.destroy)
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
+        if not parent:
+            cancel_button = tk.Button(self.button_frame, text="Exit", command=self.root.destroy)
+            cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
+        else:
+            self.cb_start_var = tk.IntVar(root, 0)
+            cb_start = tk.Checkbutton(self.button_frame, variable=self.cb_start_var, text='Autostart with CropSuite')
+            cb_start.pack(side='left', padx=5, pady=5)
+        
+        self.write_file = tk.Button(self.button_frame, text='Save Configuration', command=
+                                    lambda: self.write_to_file(config_ini, self.listbox_temp.get(0,tk.END), self.listbox_prec.get(0,tk.END),
+                                                                (int(self.cbox_start.get()), int(self.cbox_end.get())), self.extent_var.get(),
+                                                                self.cb_var_val.get(), self.combobox_param_temp.get(), self.combobox_param_prec.get(),
+                                                                self.cb_var_val_ds.get(), self.cb_start_var.get()))
 
-        self.save_button = tk.Button(self.button_frame, text="Start", command=
+        self.save_button = tk.Button(self.button_frame, text="Start Preprocessing Now", command=
                                      lambda: self.start_preproc(config_ini, self.listbox_temp.get(0,tk.END), self.listbox_prec.get(0,tk.END),
                                                                 (int(self.cbox_start.get()), int(self.cbox_end.get())), self.extent_var.get(),
                                                                 self.cb_var_val.get(), self.combobox_param_temp.get(), self.combobox_param_prec.get(),
                                                                 self.cb_var_val_ds.get()), state='disabled',
                                                                 bg='red3', fg='white')
-        self.save_button.pack(side=tk.RIGHT, padx=5, pady=5)
+        self.save_button.pack(side='right', padx=5, pady=5)
+        self.write_file.pack(side='right', padx=5, pady=5)
+
+    def copy_from(self, config_dict):
+        self.out_ent_val.set(config_dict['files']['climate_data_dir'])
 
     def start_preproc(self, config_ini, temp_files, prec_files, time_range, extent, proc_varfiles, varname_temp, varname_prec, downscaling):
         pret.preprocessing_main(config_ini, temp_files, prec_files, time_range, extent, proc_varfiles, varname_temp, varname_prec, downscaling==1)
         self.root.destroy
+
+    def write_to_file(self, config_ini, temp_files, prec_files, time_range, extent, proc_varfiles, varname_temp, varname_prec, downscaling, autostart):
+        pp_file = os.path.join(os.path.dirname(config_ini), 'preproc.ini')
+        with open(pp_file, 'w') as wf:
+            wf.write(f'autostart = {autostart}\n')
+            wf.write(f'config_ini = {config_ini}\n')
+            wf.write(f'temp_files = {[os.path.normpath(f) for f in temp_files]}\n')
+            wf.write(f'temp_varname = {varname_temp}\n')
+            wf.write(f'prec_files = {[os.path.normpath(f) for f in prec_files]}\n')
+            wf.write(f'prec_varname = {varname_prec}\n')
+            wf.write(f'time_range = {time_range}\n')
+            wf.write(f'extent = {extent}\n')
+            wf.write(f'proc_varfiles = {proc_varfiles}\n')
+            wf.write(f'downscaling = {downscaling}\n')
 
     def downs_checked(self):
         if self.cb_var_val_ds.get() == 0:
@@ -167,7 +220,7 @@ class preproc_gui():
     def timeframe_changed(self, event):
         start_val = self.cbox_start.get()
         _, end_year = pret.get_time_range(self.listbox_temp.get(0,tk.END))
-        avail_years = list(np.arange(int(start_val), end_year))
+        avail_years = list(np.arange(int(start_val), end_year+1))
         self.cbox_end['values'] = avail_years        
 
     def on_combobox_select(self, event):
@@ -181,9 +234,9 @@ class preproc_gui():
         self.cbox_start.config(state='normal')
         self.cbox_end.config(state='normal')
 
-        start_year, end_year = pret.get_time_range(self.listbox_temp.get(0,tk.END))
+        start_year, end_year = pret.get_time_range(self.listbox_temp.get(0, tk.END))
 
-        avail_years = list(np.arange(start_year, end_year))
+        avail_years = list(np.arange(start_year, end_year+1))
         self.cbox_start['values'] = avail_years
         self.cbox_end['values'] = avail_years
         self.tp_start_val.set(avail_years[0])
@@ -218,32 +271,51 @@ class preproc_gui():
 
 def parse_arguments():
     """Parse command-line arguments using sys.argv"""
-    if not '-nogui' in sys.argv:
-        return None, None, None, None, 0, 0, [0, 0, 0, 0], False
-    if len(sys.argv) < 8:
-        print("Usage: preproc_gui.py -nogui -continue -config.ini -[temperature_files] -[precipitation_files] -[startyear, endyear] -[y_max, x_min, y_min, x_max]")
-        sys.exit(1)
-    
-    nogui = '-nogui' in sys.argv
-    continue_cropsuite = '-continue' in sys.argv
-    config_file = sys.argv[sys.argv.index('-config.ini') + 1]
-    
-    temp_start = sys.argv.index('-temperature_files') + 1
-    temp_end = sys.argv.index('-precipitation_files')
-    temperature_files = sys.argv[temp_start:temp_end]
-    
-    precip_start = sys.argv.index('-precipitation_files') + 1
-    precip_end = sys.argv.index('-years')
-    precipitation_files = sys.argv[precip_start:precip_end]
-    
-    years_start = sys.argv.index('-years') + 1
-    startyear = int(sys.argv[years_start])
-    endyear = int(sys.argv[years_start + 1])
-    
-    bbox_start = sys.argv.index('-bbox') + 1
-    y_max, x_min, y_min, x_max = map(float, sys.argv[bbox_start:bbox_start + 4])
-    
-    return nogui, config_file, temperature_files, precipitation_files, startyear, endyear, (y_max, x_min, y_min, x_max), continue_cropsuite
+
+    try:    
+        argv = shlex.split(" ".join(sys.argv[1:]))
+
+        # Extract flags
+        nogui = '-nogui' in argv
+        continue_cropsuite = '-continue' in argv
+        downscaling = '-downscaling' in argv
+
+        # Extract config file
+        config_file = argv[argv.index('-config.ini') + 1]
+
+        # Function to extract lists enclosed in brackets
+        def extract_list(args, key):
+            start = args.index(key) + 1
+            if args[start].startswith("["):
+                end = start
+                while not args[end].endswith("]"):
+                    end += 1
+                values = " ".join(args[start:end + 1])[1:-1].split(",")  # Remove brackets and split
+                return [v.strip() for v in values]
+            return []
+
+        # Extract file lists
+        temperature_files = extract_list(argv, '-temperature_files')
+        precipitation_files = extract_list(argv, '-precipitation_files')
+
+        # Extract years
+        years = list(map(int, extract_list(argv, '-years')))
+        startyear, endyear = years
+
+        # Extract bounding box values
+        if '-bbox' in argv:
+            bbox_values = list(map(float, extract_list(argv, '-bbox')))
+            y_max, x_min, y_min, x_max = bbox_values
+        else:
+            y_max, x_min, y_min, x_max = 0, 0, 0, 0
+
+        return nogui, config_file, temperature_files, precipitation_files, startyear, endyear, (y_max, x_min, y_min, x_max), continue_cropsuite, downscaling
+
+    except:
+        #print("Usage: preproc_gui.py -nogui -continue -config config_file -temperature_files [temperature_files] -precipitation_files [precipitation_files] -years [startyear, endyear]")
+        #sys.exit(1)
+        return False, None, [], [], 0, 0, (0, 0, 0, 0), False, False
+
 
 def startup():
         print('''\
@@ -253,20 +325,15 @@ def startup():
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                     Version 0.95                    |
-        |                      2024-10-13                     |
+        |                    Version 1.0.1                    |
+        |                      2025-02-07                     |
         |                                                     |
         |     - Create Files for Climate and Variability -    |
-        |                                                     |
-        |                      2024-10-13                     |
-        |                                                     |
-        |                                                     |
-        |        Based on the work of Zabel et al. 2014       |
         |                                                     |
         |                                                     |
         |                     Florian Zabel                   |
         |                   Matthias Knüttel                  |
-        |                         2024                        |
+        |                         2025                        |
         |                                                     |  
         |                  University of Basel                |
         |                                                     |
@@ -279,7 +346,7 @@ def startup():
 
 if __name__ == '__main__':
     startup()
-    nogui, config_file, temperature_files, precipitation_files, startyear, endyear, (y_max, x_min, y_min, x_max), continue_cropsuite = parse_arguments()
+    nogui, config_file, temperature_files, precipitation_files, startyear, endyear, (y_max, x_min, y_min, x_max), continue_cropsuite, downscaling = parse_arguments()
     if nogui:
         pret.preprocessing_main(config_ini=config_file,
                                 temp_files=temperature_files,
@@ -289,7 +356,7 @@ if __name__ == '__main__':
                                 proc_varfiles=True,
                                 varname_temp='tas',
                                 varname_pr='pr',
-                                downscaling=True)
+                                downscaling=downscaling)
         if continue_cropsuite:
             import subprocess
             try:

@@ -8,7 +8,6 @@ import shutil
 import sys
 import data_tools as dt
 import nc_tools as nc
-from datetime import datetime
 
 
 def process_geotiff(file_path):
@@ -62,7 +61,8 @@ def merge_outputs_no_overlap(results_path, config):
     print(f' -> File Path: {results_path}')
     filenames = ['crop_limiting_factor.tif', 'crop_suitability.tif', 'multiple_cropping.tif', 'optimal_sowing_date.tif', 'suitable_sowing_days.tif', 
                  'climate_suitability.tif', 'multiple_cropping_sum.tif', 'optimal_sowing_date_mc_first.tif', 'optimal_sowing_date_mc_second.tif', 
-                 'optimal_sowing_date_mc_third.tif', 'climate_suitability_mc.tif', 'all_suitability_vals.tif', 'optimal_sowing_date_vernalization.tif']
+                 'optimal_sowing_date_mc_third.tif', 'climate_suitability_mc.tif', 'all_suitability_vals.tif', 'optimal_sowing_date_vernalization.tif',
+                 'soil_suitability.tif']
     areas = [d for d in next(os.walk(results_path))[1] if d.startswith('Area_')]
     print(' -> Found Areas: ')
     for area in areas:
@@ -86,13 +86,15 @@ def merge_outputs_no_overlap(results_path, config):
         if len(tif_files) < 1 and len(nc_files) < 1:
             continue
         output_file = os.path.join(merged_result, soil_layer) if len(tif_files) > 1 else os.path.join(merged_result, soil_layer.replace('.tif', '.nc'))
+        if os.path.exists(output_file):
+            continue
         if len(tif_files) > 1:
             src_files_to_mosaic = []
             for fp in tif_files:
                 src = rasterio.open(fp, 'r')
                 src_files_to_mosaic.append(src)
             mosaic, out_trans = merge(src_files_to_mosaic)
-            out_meta = src.meta.copy() # type: ignore
+            out_meta = src.meta.copy()
             out_meta.update({'driver': 'GTiff', 'height': mosaic.shape[1], 'width': mosaic.shape[2], 'transform': out_trans, 'compress': 'lzw'})
             try:
                 with rasterio.open(output_file, 'w', **out_meta) as dest:
@@ -111,6 +113,42 @@ def merge_outputs_no_overlap(results_path, config):
         crops = set(next(os.walk([os.path.join(results_path, area) for area in areas][0]))[1])
     crops = list(crops)
 
+    if 'crop_rotation' in crops:
+        crops.pop(crops.index('crop_rotation'))
+        directories = [os.path.join(results_path, area, 'crop_rotation') for area in areas]
+        combinations = os.listdir(directories[0])
+
+        for combination in combinations:
+            current_files = os.listdir(os.path.join(directories[0], combination))
+
+            for filename in current_files:
+                files_to_merge = [os.path.join(directory, combination, filename) for directory in directories]
+                output_file = os.path.join(merged_result, 'crop_rotation', combination, filename)
+                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+                if files_to_merge[0].endswith('.nc') or files_to_merge[0].endswith('.nc4'):
+                    nc.merge_netcdf_files(files_to_merge, output_file, nodata_value=-1) #type:ignore
+                else:
+                    dt.geotiff_to_smallest_datatype(files_to_merge)
+                    with rasterio.open(files_to_merge[0]) as src:
+                        meta = src.meta.copy()
+                        dtype = src.dtypes[0]
+                    with rasterio.Env():
+                        src_files_to_mosaic = [rasterio.open(file) for file in files_to_merge]
+                        mosaic, out_trans = merge(src_files_to_mosaic)
+                        meta = src_files_to_mosaic[0].meta.copy()
+                        meta.update({'driver': 'GTiff', 'height': mosaic.shape[1], 'width': mosaic.shape[2], 'transform': out_trans, 'compress': 'lzw', 'dtype': dtype})
+                        for src in src_files_to_mosaic:
+                            src.close()
+                    try:
+                        with rasterio.open(output_file, 'w', **meta) as dest: 
+                            dest.write(mosaic)
+                    except:
+                        meta.update({'BIGTIFF': 'YES'})
+                        with rasterio.open(output_file, 'w', **meta) as dest:
+                            dest.write(mosaic)
+                    del mosaic
+
     print(' -> Found Crops:')
     for crop in crops:
         print(f'    * {crop}')
@@ -122,6 +160,13 @@ def merge_outputs_no_overlap(results_path, config):
         if os.path.isdir(output_dir):
             shutil.rmtree(output_dir)
         os.makedirs(output_dir, exist_ok=True)
+    
+        try:
+            first_dir = [os.path.join(results_path, area, crop) for area in areas][0]
+            liminf = os.path.join(first_dir, 'limiting_factor.inf')
+            shutil.copyfile(liminf, os.path.join(output_dir, 'limiting_factor.inf'))
+        except:
+            pass
         
         for filename in filenames:
             tif_files = [file for file in [os.path.join(directory, filename) for directory in directories] if os.path.exists(file)]
@@ -129,51 +174,36 @@ def merge_outputs_no_overlap(results_path, config):
             if len(tif_files) < 1 and len(nc_files) < 1:
                 continue
             output_file = os.path.join(output_dir, filename) if len(tif_files) > 1 else os.path.join(output_dir, filename.replace('.tif', '.nc'))
+            if os.path.exists(output_file):
+                continue
             if len(tif_files) > 1:
                 if not os.path.exists(tif_files[0]):
                     continue
-                
-                if get_num_bands(tif_files[0]) == 1:
-                    src_files_to_mosaic = []
-                    for fp in tif_files:
-                        src = rasterio.open(fp)
-                        src_files_to_mosaic.append(src)
-
-                    mosaic, out_trans = merge(src_files_to_mosaic)
-                    out_meta = src.meta.copy() # type: ignore
-                    out_meta.update({'driver': 'GTiff', 'height': mosaic.shape[1], 'width': mosaic.shape[2], 'transform': out_trans, 'compress': 'lzw'})
-                    try:
-                        with rasterio.open(output_file, 'w', **out_meta) as dest:
-                            dest.write(mosaic[0], 1)
-                    except:
-                        with rasterio.open(output_file, 'w', **out_meta, BIGTIFF='yes') as dest:
-                            dest.write(mosaic[0], 1)
-
-                else:
+                dt.geotiff_to_smallest_datatype(tif_files)
+                with rasterio.open(tif_files[0]) as src:
+                    meta = src.meta.copy()
+                    dtype = src.dtypes[0]
+                with rasterio.Env():
                     src_files_to_mosaic = [rasterio.open(file) for file in tif_files]
                     mosaic, out_trans = merge(src_files_to_mosaic)
-                    out_meta = src_files_to_mosaic[0].meta.copy()
-                    out_meta.update({'driver': 'GTiff',
-                                    'height': mosaic.shape[1],
-                                    'width': mosaic.shape[2],
-                                    'transform': out_trans,
-                                    'compress': 'lzw'})
-                    try:
-                        with rasterio.open(output_file, 'w', **out_meta) as dest:
-                            dest.write(mosaic)
-                    except:
-                        with rasterio.open(output_file, 'w', **out_meta, BIGTIFF='yes') as dest:
-                            dest.write(mosaic)
+                    meta = src_files_to_mosaic[0].meta.copy()
+                    meta.update({'driver': 'GTiff', 'height': mosaic.shape[1], 'width': mosaic.shape[2], 'transform': out_trans, 'compress': 'lzw', 'dtype': dtype})
+                    for src in src_files_to_mosaic:
+                        src.close()
+                try:
+                    with rasterio.open(output_file, 'w', **meta) as dest: 
+                        dest.write(mosaic)
+                except:
+                    meta.update({'BIGTIFF': 'YES'})
+                    with rasterio.open(output_file, 'w', **meta) as dest:
+                        dest.write(mosaic)
+                del mosaic
 
                 if config['options']['output_format'].lower() == 'cog':
                     dt.create_cog_from_geotiff(output_file, output_file.replace('.tif', '_cog.tif'))
 
-                if os.path.exists(output_file):
-                    process_geotiff(output_file)
-            
             if len(nc_files) > 1:
                 nc.merge_netcdf_files(nc_files, output_file, nodata_value=-1) #type:ignore
-
 
             sys.stdout.write(f'{crop} {filename} created!                       '+'\r')
             sys.stdout.flush()
@@ -249,8 +279,8 @@ def merge_outputs(results_path):
             out_meta.update({'driver': 'GTiff', 'height': mosaic.shape[1], 'width': mosaic.shape[2], 'transform': out_trans, 'compress': 'lzw'})
             with rasterio.open(output_file, 'w', **out_meta) as dest:
                 dest.write(mosaic[0], 1)
-            if os.path.exists(output_file):
-                process_geotiff(output_file)
+            #if os.path.exists(output_file):
+            #    process_geotiff(output_file)
             print(f'{crop} {filename} created!')
 
     print('\n\nAll Output Files successfully merged!\n\n')

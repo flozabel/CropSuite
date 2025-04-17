@@ -11,15 +11,18 @@ def read_ini_file(file_path, comment_char='!'):
         dict: A nested dictionary representing the contents of the INI file. The outer keys are the sections
         in the file, and the inner keys and values correspond to the key-value pairs in each section.
     """
-    config = configparser.ConfigParser()
-    config.read(file_path)
-    result = {}
-    for section in config.sections():
-        result[section] = {}
-        for key, value in config.items(section):
-            result[section][key] = value.split(comment_char)[0].strip()
-    return replace_yn_with_boolean(result)
-
+    try:
+        config = configparser.ConfigParser()
+        config.read(file_path)
+        result = {}
+        for section in config.sections():
+            result[section] = {}
+            for key, value in config.items(section):
+                result[section][key] = value.split(comment_char)[0].strip()
+        return replace_yn_with_boolean(result)
+    except Exception as e:
+        print(f"Error reading INI file: {e}")
+        return {}
 
 def replace_yn_with_boolean(data):
     """
@@ -68,7 +71,7 @@ def write_config(config_dict, ini_path='config.ini'):
             wf.write(f'[{main_key}]')
             for sub_key in list(config_dict.get(main_key).keys()):
                 value = config_dict.get(main_key).get(sub_key)
-                if not str(main_key).startswith('parameters.'):
+                if not str(main_key).startswith('parameters.') and not str(sub_key).startswith('simulate_calcification') and not str(sub_key).startswith('resolution'):
                     if value == True:
                         value = 'y'
                     elif value == False:

@@ -8,13 +8,30 @@ try:
 except Exception as e:
     print(f"Failed to modify system path: {e}")
 try:
+    from src import check_versions as cv
     from src import check_prereqs as cp
 except:
     import check_prereqs as cp
+    import check_versions as cv
 import time
-import traceback
 
-def run(silent_mode, config_file = None, gui=None):
+class Tee:
+    def __init__(self, filename):
+        self.file = open(filename, 'w')
+        self.stdout = sys.stdout
+
+    def write(self, message):
+        self.stdout.write(message)
+        self.file.write(message)
+
+    def flush(self):
+        self.stdout.flush()
+        self.file.flush()
+
+    def close(self):
+        self.file.close()
+
+def run(silent_mode=False, config_file=None, gui = None):
     # Check required libraries
     req_libs = ['os', 'configparser', 'numpy', 'sys', 'multiprocessing', 'gc', 'numba', 'scipy', 'statistics',\
             'glob', 'rasterio', 'rio_cogeo', 'concurrent', 'psutil', 'matplotlib', 'math', 'xarray', 'numba', 'datetime']
@@ -47,6 +64,8 @@ def run(silent_mode, config_file = None, gui=None):
         from src import merge_geotiff as mg
         from src import nc_tools as nc
         from src import downscaling as ds
+        from src import preproc_tools as pti
+        from src import crop_rotation as cro
     except:
         import climate_suitability_main as csm
         import read_climate_ini as rci
@@ -56,7 +75,9 @@ def run(silent_mode, config_file = None, gui=None):
         import data_tools as dt
         import merge_geotiff as mg
         import nc_tools as nc
-        import downscaling as ds        
+        import downscaling as ds
+        import preproc_tools as pti   
+        import crop_rotation as cro  
     import numpy as np
     import math
     import shutil
@@ -70,20 +91,20 @@ def run(silent_mode, config_file = None, gui=None):
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                     Version  1.0                    |
-        |                      2024-12-12                     |
+        |                    Version 1.3.0                    |
+        |                      2025-04-17                     |
         |                                                     |
         |                                                     |
         |                   Matthias Knüttel                  |
         |                     Florian Zabel                   |
-        |                         2024                        |
+        |                         2025                        |
         |                                                     |
         |                                                     |
-        |         Departement of Environmental Sciences       |      
+        |          Department of Environmental Sciences       |      
         |                 University of Basel                 |
         |                                                     |
         |                                                     |
-        |              © 2024 All rights reserved             |
+        |           © 2023-2025 All rights reserved           |
         |                                                     |
         =======================================================
         
@@ -94,6 +115,7 @@ def run(silent_mode, config_file = None, gui=None):
         config_file = gui.get_config_path()
 
     if config_file is None:
+        config_file = os.path.abspath('config.ini')
         if os.path.exists('config.ini'):
             if gui != None:
                 gui.set_config_ini(r'.\config.ini')
@@ -119,20 +141,18 @@ def run(silent_mode, config_file = None, gui=None):
         else:
             dt.throw_exit_error('Error: Config ini does not exist:\n'+str(config_file))
             exit(1)
-    
-    # Check if all required settings are readable in the config file
-    cp.check_config_file(climate_config)
 
     if not silent_mode:
         input('\n\nPress Enter to Start\n\n')
 
-    # Split big area into smaller ones
-    #MaxY     MinX     MinY     MaxX    
+    pret_file = os.path.join(os.path.dirname(config_file), 'preproc.ini')
+    if os.path.exists(pret_file):
+        config_ini, temp_files, temp_varname, prec_files, prec_varname, time_range, pret_extent, proc_varfiles, downscaling, autostart = pti.parse_inf_file(pret_file)
+        if autostart == 1:
+            pti.preprocessing_main(config_ini, temp_files, prec_files, time_range, pret_extent, proc_varfiles, temp_varname, prec_varname, downscaling=downscaling==1) #type:ignore
+
+    cp.check_config_file(climate_config)
     extent = check_files.check_all_inputs(climate_config)
-    # extent = [17, -17, -3, 13] # West Africa
-    # extent = [39, -25, -36, 55] # Africa
-    # extent = [36, -10, 29, -1] # Morocco
-    # extent = [12, -4, 4, 2] # Ghana
      
     if gui != None:
         gui.check_inpts_true()
@@ -153,10 +173,10 @@ def run(silent_mode, config_file = None, gui=None):
     if climate_config['climatevariability'].get('consider_variability', True):
         ds.interpolate_rrpcf(climate_config, extent,  area_name,  [f for f in os.listdir(climate_config['files'].get('plant_param_dir', 'plant_params')) if f.endswith('.inf')])
 
-    if not dt.extent_is_covered_by_second_extent(list(nc.get_maximum_extent_from_list(temp_files).values()), extent):
-        [os.remove(f) for f in prec_files+temp_files]
-        prec_files, prec_dailyfiles = ds.interpolate_precipitation(climate_config, extent, area_name)
-        temp_files, temp_dailyfiles = ds.interpolate_temperature(climate_config, extent, area_name)
+    #if not dt.extent_is_covered_by_second_extent(list(nc.get_maximum_extent_from_list(temp_files).values()), extent):
+    #    [os.remove(f) for f in prec_files+temp_files]
+    #    prec_files, prec_dailyfiles = ds.interpolate_precipitation(climate_config, extent, area_name)
+    #    temp_files, temp_dailyfiles = ds.interpolate_temperature(climate_config, extent, area_name)
 
     if gui != None:
         gui.set_downscaling(completed=True)
@@ -164,9 +184,22 @@ def run(silent_mode, config_file = None, gui=None):
 
 
     ##### CLIMATE SUITABILITY #####
-    no_tiles = np.clip(math.ceil(area / 700), 1, 100000) if climate_config['options']['use_scheduler'] else 1
-    y_coords = np.around(np.linspace(extent[2], extent[0], num=int(no_tiles) + 1), 2) # type: ignore
-    extents = [[y2, extent[1], y1, extent[3]] for y1, y2 in zip(y_coords[:-1], y_coords[1:])] # type: ignore
+    resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
+    no_tiles = np.clip(math.ceil(area / 700 / resolution_factor.get(int(climate_config['options'].get('resolution', 5)), 1) ** 2), 1, 100000) if climate_config['options']['use_scheduler'] else 1
+    final_shape = dt.get_resolution_array(climate_config, extent, True)
+
+    def adjust_extent_0(extent, resolution):
+        return extent[2] + ((extent[0] - extent[2]) // resolution ) * resolution
+
+    if final_shape[0] % no_tiles != 0:
+        no_tiles = math.ceil(final_shape[0] / (final_shape[0] // no_tiles))
+
+    resolution = (extent[3] - extent[1]) / final_shape[1]
+    extent[0] = adjust_extent_0(extent, resolution)
+
+    lst = [i * int(final_shape[0] / no_tiles) for i in range(no_tiles)] + [final_shape[0]]
+    extents = [[extent[2] + lst[i+1] * resolution, extent[1], extent[2] + lst[i] * resolution, extent[3]]for i in range(no_tiles)]
+    extents = [[round(val, 4) for val in sublist] for sublist in extents]
 
     for idx, extent in enumerate(extents):
         if gui != None:
@@ -177,8 +210,7 @@ def run(silent_mode, config_file = None, gui=None):
 
         area_name = f'Area_{int(extent[0])}N{int(extent[1])}E-{int(extent[2])}N{int(extent[3])}E'
         temp = os.path.join(output_path, area_name)
-        tmp = [os.path.join(os.path.split(temp)[0]+'_var', os.path.split(temp)[1]), os.path.join(os.path.split(temp)[0]+'_novar', os.path.split(temp)[1])][1]
-        
+
         plant_params = rpp.read_crop_parameterizations_files(climate_config['files']['plant_param_dir'])
         plant_params_formulas = rpp.get_plant_param_interp_forms_dict(plant_params, climate_config)
         plants = [plant for plant in plant_params]
@@ -203,15 +235,12 @@ def run(silent_mode, config_file = None, gui=None):
             print('\nClimate Suitability Data is already existing.\n -> Using existing data.\n')
         else:
             print(' -> Loading required climate data to memory...')
-            land_sea_mask, _ = dt.load_specified_lines(climate_config['files']['land_sea_mask'], extent, False) #type:ignore
             temperature = nc.read_area_from_netcdf_list(temp_files, overlap=False, extent=extent, dayslices=temp_dailyfiles)
-            temperature = dt.check_dimensions(land_sea_mask, temperature)
             precipitation = nc.read_area_from_netcdf_list(prec_files, overlap=False, extent=extent, dayslices=prec_dailyfiles)      
-            precipitation = dt.check_dimensions(land_sea_mask, precipitation)
-
-            if land_sea_mask.shape[0] != temperature.shape[0]: #type:ignore
-                land_sea_mask = dt.interpolate_nanmask(land_sea_mask, temperature.shape[:2]) #type:ignore
-
+            fine_resolution = (temperature.shape[0], temperature.shape[1]) #type:ignore
+            land_sea_mask, _ = dt.load_specified_lines(climate_config['files']['land_sea_mask'], extent, False)
+            if land_sea_mask.shape != fine_resolution:
+                land_sea_mask = dt.interpolate_nanmask(land_sea_mask, fine_resolution)
             gc.collect()
             print(' -> Climate Data successfully loaded into memory')
             ret_paths = csm.climate_suitability(climate_config, extent, temperature, precipitation, land_sea_mask, plant_params, plant_params_formulas, temp, full_area_name)
@@ -231,12 +260,36 @@ def run(silent_mode, config_file = None, gui=None):
                     gui.set_cropsuit(completed=False, started=True)
                     gui.update()
 
-                climsuit = np.dstack([dt.load_specified_lines(tif, extent, False)[0] for tif in [os.path.join(temp, crop, 'climate_suitability.tif') for crop in os.listdir(temp) if os.path.isdir(os.path.join(temp, crop))]])
-                limiting = np.dstack([dt.load_specified_lines(tif, extent, False)[0] for tif in [os.path.join(temp, crop, 'limiting_factor.tif') for crop in os.listdir(temp) if os.path.isdir(os.path.join(temp, crop))]])
+                climsuit = np.dstack([
+                    dt.load_specified_lines(
+                        next(f for f in [os.path.join(temp, c, f'climate_suitability{ext}') for ext in ['.tif', '.nc', '.nc4']] if os.path.exists(f)),
+                        extent, False
+                    )[0].astype(np.int8)
+                    for c in os.listdir(temp)
+                    if c != 'crop_rotation' and os.path.isdir(os.path.join(temp, c))
+                ])
 
-                if 'land_sea_mask' not in locals() and 'land_sea_mask' not in globals():
-                    land_sea_mask, _ = dt.load_specified_lines(climate_config['files']['land_sea_mask'], extent, False)
+                limiting = np.dstack([
+                    dt.load_specified_lines(
+                        next(f for f in [os.path.join(temp, c, f'limiting_factor{ext}') for ext in ['.tif', '.nc', '.nc4']] if os.path.exists(f)),
+                        extent, False
+                    )[0].astype(np.int8)
+                    for c in os.listdir(temp)
+                    if c != 'crop_rotation' and os.path.isdir(os.path.join(temp, c))
+                ])
+
+                #climsuit = np.dstack([(dt.load_specified_lines(tif, extent, False)[0]).astype(np.int8) for tif in [os.path.join(temp, crop, 'climate_suitability.tif') for crop in os.listdir(temp) if crop != 'crop_rotation' and os.path.isdir(os.path.join(temp, crop))]])
+                #limiting = np.dstack([(dt.load_specified_lines(tif, extent, False)[0]).astype(np.int8) for tif in [os.path.join(temp, crop, 'limiting_factor.tif') for crop in os.listdir(temp) if crop != 'crop_rotation' and os.path.isdir(os.path.join(temp, crop))]])
+                land_sea_mask, _ = dt.load_specified_lines(climate_config['files']['land_sea_mask'], extent, False)
+                fine_resolution = (climsuit.shape[0], climsuit.shape[1])
+                if land_sea_mask.shape != fine_resolution:
+                    land_sea_mask = dt.interpolate_nanmask(land_sea_mask, fine_resolution)
                 crop_suit.cropsuitability(climate_config, climsuit, limiting, plant_params_formulas, plant_params, extent, land_sea_mask, temp)
+
+        ##### CROP ROTATION #####
+        if climate_config['options'].get('consider_crop_rotation', False):
+            cro.crop_rotation(config_file)
+
         print('Complete Current Extent')
         if gui != None:
             gui.set_cropsuit(completed=True, started=True)           
@@ -278,7 +331,8 @@ def run(silent_mode, config_file = None, gui=None):
                         shutil.rmtree(os.path.join(output_dir, f'Area_{int(extent[0])}N{int(extent[1])}E-{int(extent[2])}N{int(extent[3])}E'))
 
     if climate_config['options'].get('remove_downscaled_climate', False):
-        [os.remove(f) for f in prec_files+temp_files]
+        [os.remove(os.path.join(os.path.dirname(prec_files[0]), f)) for f in os.listdir(os.path.dirname(prec_files[0])) if os.path.isfile(os.path.join(os.path.dirname(prec_files[0]), f))]
+
         try:
             os.removedirs(os.path.dirname(temp_files[0]))
             os.removedirs(os.path.dirname(prec_files[0]))
@@ -304,33 +358,31 @@ def run(silent_mode, config_file = None, gui=None):
 
 
 if __name__ == '__main__':
-    if len(sys.argv[1:]) > 3:
-        print("""Usage:
-              -> python CropSuite.py
-              -> python CropSuite.py -silent
-              -> python CropSuite.py -silent -config "path_to_config.ini"
-              -> python CropSuite.py -config "path_to_config.ini\"""")
-        exit()
-    else:
-        silent_mode = '-silent' in sys.argv
+    if cv.check_versions():
+        try:
+            args = sys.argv[1:]
+            silent = "-silent" in args
+            config = args[args.index("-config") + 1] if "-config" in args and len(args) > args.index("-config") + 1 else None
+            debug = "-debug" in args
+        except:
+            print("""Usage:
+                -> python CropSuite.py
+                -> python CropSuite.py -silent
+                -> python CropSuite.py -silent -config "path_to_config.ini"
+                -> python CropSuite.py -config "path_to_config.ini\"""")
+            exit()
+        try:
+            if debug:
+                tee = Tee('logfile.log')
+                original_stdout = sys.stdout
+                sys.stdout = tee
 
-    config_index = sys.argv.index('-config') if '-config' in sys.argv else None
-    config_path = None
+            run(silent, config)
 
-    if config_index is not None:
-        if config_index + 1 < len(sys.argv):
-            config_path = sys.argv[config_index + 1]
-        else:
-            print("Error: Path to configuration file is missing after -config option.")
-            exit(1)
+        finally:
+            if debug:
+                sys.stdout = original_stdout
+                tee.close()
 
-    try:
-        if config_path is None:
-            run(silent_mode)
-        else:
-            run(silent_mode, config_path)
-
-    except Exception as e:
-        print(traceback.format_exc())
-        input('\nAn untreated critical error occurred\n\n'+str(e)+'\n\nPress Enter to Exit')
-        exit()
+    sys.exit(1)
+    exit()

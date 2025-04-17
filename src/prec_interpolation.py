@@ -9,7 +9,7 @@ try:
 except:
     from src import data_tools as dt
     from src import nc_tools as nc
-
+from skimage import transform as skt
 
 def read_tif(fn):
     with rasterio.open(fn, 'r') as src:
@@ -92,12 +92,17 @@ def calculate_prec_factors(fine_dem_shape, coarse_dem_shape, world_clim_data_dir
         nan_mask = np.isnan(world_clim_data)
         world_clim_data = world_clim_data.astype(np.float16)
         world_clim_data = dt.fill_nan_nearest(world_clim_data)
+
+        if world_clim_data.shape[0] != fine_dem_shape[0]: #type:ignore
+            world_clim_data = skt.resize(world_clim_data, fine_dem_shape, order=1, mode='edge', anti_aliasing=False).astype(np.float16)
+            nan_mask = dt.interpolate_nanmask(nan_mask, fine_dem_shape)
+
         world_clim_data_coarse = dt.resize_array_mean(world_clim_data, coarse_dem_shape).astype(np.float16)
-        world_clim_data_coarse = dt.resize_array_interp(world_clim_data_coarse, world_clim_data.shape)[0].astype(np.float16) #type:ignore
+        world_clim_data_coarse = skt.resize(world_clim_data_coarse, world_clim_data.shape, order=1, mode='edge', anti_aliasing=False) #type:ignore
 
         # Calculate Factor
         if world_clim_data.shape[0] != fine_dem_shape[0]: #type:ignore
-            dat, _ = dt.resize_array_interp(world_clim_data / world_clim_data_coarse, (fine_dem_shape[0], fine_dem_shape[1]))
+            dat = skt.resize(world_clim_data / world_clim_data_coarse, fine_dem_shape, order=1, mode='edge', anti_aliasing=False)
             dat = dat.astype(np.float16)
         else:
             dat = (world_clim_data / world_clim_data_coarse).astype(np.float16)

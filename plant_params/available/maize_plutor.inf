@@ -39,5 +39,3 @@ prec_req_days = 		15
 consecutive_dry_days = 		21
 temp_for_sow_duration = 		7
 temp_for_sow = 		8
-AddCon:1 = 		Precipitation,1,31,>=,50
-AddCon:2 = 		Temperature,81,90,>=,12

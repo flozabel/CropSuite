@@ -3,8 +3,8 @@ import os
 sys.path.append(os.path.join(os.getcwd(), 'src'))
 import data_tools as dt
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
 import rasterio
+from rasterio.transform import from_bounds
 import concurrent.futures
 import warnings
 warnings.filterwarnings('ignore')
@@ -101,7 +101,7 @@ def process_day_climsuit_memopt(args):
     """
     day, growing_cycle, temperature, precipitation, plant_params_forumlas, plant, wintercrop, water_mask, irrigation,\
         crop_failures, vernalization_params, lethal, lethal_params, sowprec_params, photoperiod, photoperiod_params,\
-            max_consec_dry_days, dursowing, sowingtemp, additional_conditions = args
+            max_consec_dry_days, dry_day_prec, dursowing, sowingtemp, max_prec_val, max_prec_dur, additional_conditions = args
     # vern_period is the time period, for which the vernalization requirements of the effective vernalization days are searched
     vern_period = 150
     temp_path = os.path.join(os.getcwd(), 'temp', f'{day}.tif')
@@ -246,6 +246,9 @@ def process_day_climsuit_memopt(args):
         temperature = np.concatenate((temperature[..., day:], temperature[..., :day+growing_cycle-365]), axis=2)
         precipitation = np.concatenate((precipitation[..., day:], precipitation[..., :day+growing_cycle-365]), axis=2) if irrigation == 0 else np.zeros_like(temperature)
 
+    if temperature.shape[0] != water_mask.shape[0]:
+        water_mask = water_mask[:temperature.shape[0], :temperature.shape[1]]
+
     temp = np.empty((temperature.shape[0], temperature.shape[1]), dtype=np.int16)
     temp[water_mask == 1] = np.mean(temperature[water_mask == 1], axis=1).astype(np.int16)
 
@@ -273,7 +276,6 @@ def process_day_climsuit_memopt(args):
     else:
         failure_suit = np.full_like(temp, 100)
 
-
     if irrigation == 0 and growing_cycle < 365 and not wintercrop:
         # sowprec_params: [prec_req_after_sow, prec_req_days]
         prec_after_sowing = np.empty((temperature.shape[0], temperature.shape[1]), dtype=np.uint16)
@@ -287,7 +289,6 @@ def process_day_climsuit_memopt(args):
     collect()
 
     if photoperiod and growing_cycle < 365:
-        # photoperiod_params [min_hours, max_hours, min_lat, max_lat]
         min_hours, max_hours, min_y, max_y = photoperiod_params
         sunshine_hours = calculate_average_sunshine((temp.shape[0], temp.shape[1]), (min_y, max_y), day, day+growing_cycle)
         sunshine_hours[(sunshine_hours > max_hours) | (sunshine_hours < min_hours)] = 0
@@ -299,41 +300,57 @@ def process_day_climsuit_memopt(args):
         max_dur, max_tmp = lethal_params[2], lethal_params[3]
 
         if min_dur != 0:
-            bool_arr = temperature < min_tmp * 10
-            sliding_windows = sliding_window_view(bool_arr, window_shape=min_dur, axis=2)
-            mask = np.any(np.sum(sliding_windows, axis=-1) == min_dur, axis=-1)
+            cons_arr = np.zeros((temperature.shape[0], temperature.shape[1]), dtype=np.int16)
+            for day in range(temperature.shape[2]):
+                bool_arr = temperature[..., day] < (min_tmp * 10)
+                cons_arr[bool_arr] += 1
+                cons_arr[(~bool_arr) & (cons_arr < min_dur)] = 0
+            mask = cons_arr >= min_dur
             if wintercrop:
                 opt_start_date[mask] = -1
             temp[mask] = 0
+            del cons_arr
 
         if max_dur != 0:
-            bool_arr = temperature > max_tmp * 10
-            sliding_windows = sliding_window_view(bool_arr, window_shape=max_dur, axis=2)
-            mask = np.any(np.sum(sliding_windows, axis=-1) == max_dur, axis=-1)
+            cons_arr = np.zeros((temperature.shape[0], temperature.shape[1]), dtype=np.int16)
+            for day in range(temperature.shape[2]):
+                bool_arr = temperature[..., day] > (max_tmp * 10)
+                cons_arr[bool_arr] += 1
+                cons_arr[(~bool_arr) & (cons_arr < max_dur)] = 0
+            mask = cons_arr >= max_dur
             if wintercrop:
                 opt_start_date[mask] = -1
             temp[mask] = 0
-    
-    #if wintercrop:
-        #vern_suit = (get_suitability_val_dict(plant_params_forumlas, plant, 'temp', vern_temp[water_mask == 1] / 10) * 100).astype(np.int8)
-        #temp[temp > 0] = ((temp[temp > 0] * (growing_cycle)) + (vern_temp[temp > 0] * vernalization_params[5])) / (growing_cycle + vernalization_params[5])
-        #temp[vern_temp <= 0] = 0
-        #prec[prec > 0] = ((prec[prec > 0] * (growing_cycle)) + (vern_prec[prec > 0] * vernalization_params[5])) / (growing_cycle + vernalization_params[5])
-        #prec[vern_prec <= 0] = 0
-        #temp[opt_start_date == -1] = 0
-        #del vern_prec, vern_temp
+            del cons_arr
 
-    if max_consec_dry_days > 0 and not irrigation == 1:
-        bool_arr = precipitation <= 10 # less than 1 mm
-        sliding_windows = sliding_window_view(bool_arr, window_shape=max_consec_dry_days, axis=2)
-        consecutive_drydays = np.any(np.sum(sliding_windows, axis=-1) == max_consec_dry_days, axis=-1)
-        prec[(water_mask == 1) & consecutive_drydays] = 0
+        if max_consec_dry_days > 0 and not irrigation == 1:
+            cons_arr = np.zeros((precipitation.shape[0], precipitation.shape[1]), dtype=np.int16)
+            for day in range(precipitation.shape[2]):
+                bool_arr = precipitation[..., day] < (dry_day_prec * 10) if dry_day_prec != 0 else 1
+                cons_arr[bool_arr] += 1
+                cons_arr[(~bool_arr) & (cons_arr < max_consec_dry_days)] = 0
+            mask = cons_arr >= max_consec_dry_days
+            prec[(water_mask == 1) & mask] = 0
+            del cons_arr
+
+        if max_prec_val > 0 and not irrigation == 1:
+            cons_arr = np.zeros((precipitation.shape[0], precipitation.shape[1]), dtype=np.int16)
+            for day in range(precipitation.shape[2]):
+                bool_arr = precipitation[..., day] > (max_prec_val * 10) if max_prec_val != 0 else 75
+                cons_arr[bool_arr] += 1
+                cons_arr[(~bool_arr) & (cons_arr < max_consec_dry_days)] = 0
+            mask = cons_arr >= max_prec_dur if max_prec_dur != 0 else 3
+            prec[(water_mask == 1) & mask] = 0
+            del cons_arr
 
     if irrigation == 1:
         prec.fill(100)
 
     if len(additional_conditions) > 0:
         for cond in additional_conditions:
+            cond[1] = int(cond[1])
+            cond[2] = int(cond[2])
+            cond[4] = int(float(cond[4]))
             tp = cond[0].lower()
             start_day, end_day = int(cond[1]), int(cond[2])
             val = int(cond[4] * 10)
@@ -405,13 +422,6 @@ def read_tif_data_to_tempprecfail_arr(shape):
     sys.stdout.write(f'   -> All files read in successfully                       '+'\r')
     sys.stdout.flush()
     collect()
-    """
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = list(executor.map(read_and_process, range(365)))
-
-    for day, result in enumerate(results):
-        temp_arr[..., day, :] = result
-    """
     return temp_arr[..., 0], temp_arr[..., 1], temp_arr[..., 2], temp_arr[..., 3]
 
 
@@ -558,16 +568,15 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
     else:
         wintercrop, vernalization_params = False, [0, 0, 0, 0, 0, 0]
 
-    if 'lethal_thresholds' in plant_params[plant].keys():
-        lethal = plant_params[plant].get('lethal_thresholds')[0] == 1
-        if lethal:
-            min_dur = int(plant_params[plant].get('lethal_min_duration')[0])
-            min_tmp = int(plant_params[plant].get('lethal_min_temp')[0])
-            max_dur = int(plant_params[plant].get('lethal_max_duration')[0])
-            max_tmp = int(plant_params[plant].get('lethal_max_temp')[0])
-            lethal_params = [min_dur, min_tmp, max_dur, max_tmp]
-        else:
-            lethal_params = [0, 0, 0, 0]
+    if plant_params[plant].get('lethal_thresholds', [0])[0] == 1:
+        try:
+            lethal_params = [
+                int(plant_params[plant].get('lethal_min_temp_duration', [0])[0]),
+                int(plant_params[plant].get('lethal_min_temp', [0])[0]),
+                int(plant_params[plant].get('lethal_max_temp_duration', [0])[0]),
+                int(plant_params[plant].get('lethal_max_temp', [0])[0])]
+        except (ValueError, TypeError, IndexError):
+            lethal, lethal_params = False, [0, 0, 0, 0]
     else:
         lethal, lethal_params = False, [0, 0, 0, 0]
 
@@ -585,14 +594,23 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
     else:
         sowprec_params = [20, 15]
 
-    if 'consecutive_dry_days' in plant_params[plant].keys():
-        max_consec_dry_days = int(plant_params[plant].get('consecutive_dry_days')[0])
+    if 'lethal_min_prec_duration' in plant_params[plant].keys() and 'lethal_min_prec' in plant_params[plant].keys():
+        max_consec_dry_days = int(plant_params[plant].get('lethal_min_prec_duration', 0)[0])
+        dry_day_prec = int(plant_params[plant].get('lethal_min_prec', 0)[0])
     else:
         max_consec_dry_days = 0
+        dry_day_prec = 0
+
+    if 'lethal_max_prec' in plant_params[plant].keys() and 'lethal_max_prec_duration' in plant_params[plant].keys():
+        max_prec_val = int(plant_params[plant].get('lethal_max_prec', 0)[0])
+        max_prec_dur = int(plant_params[plant].get('lethal_max_prec_duration', 0)[0])
+    else:
+        max_prec_val = 0
+        max_prec_dur = 0
 
     if 'temp_for_sow_duration' in plant_params[plant].keys() and 'temp_for_sow' in plant_params[plant].keys():
-        dursowing = int(plant_params[plant].get('temp_for_sow_duration')[0])
-        sowingtemp = int(plant_params[plant].get('temp_for_sow')[0])
+        dursowing = int(plant_params[plant].get('temp_for_sow_duration', 7)[0])
+        sowingtemp = int(plant_params[plant].get('temp_for_sow', 5)[0])
     else:
         dursowing, sowingtemp = 7, 5
     additional_conditions = [cond for i in range(100) if (cond := plant_params[plant].get(f'AddCon:{i}')) is not None]
@@ -604,12 +622,17 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         factor = {'darwin': 10, 'win32': 20}.get(sys.platform, 60)
     else:
         factor = {'darwin': 6, 'win32': 12}.get(sys.platform, 10)
+    resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
     if wintercrop:
         max_proc = int(np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads))
+        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads)
+        max_proc = np.clip(int(max_proc), 1, no_threads)
+        max_proc = np.clip(int(max_proc // 5), 1, no_threads-1)
     else:
         max_proc = np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads)
-
-
+        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads)
+        max_proc = np.clip(int(max_proc), 1, no_threads)
+    
     ### Climate Extremes / Climate Variability Module ###
     
     if (len(rrpcf_files) > 0) and climate_config['climatevariability'].get('consider_variability', False):
@@ -647,11 +670,11 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         if crop_failures.ndim == 2: # type: ignore
             process_day_climsuit_memopt([day, len_growing_cycle, temperature, precipitation, plant_params_formulas, plant, wintercrop, water_mask,
                                          int(climate_config['options']['irrigation']), crop_failures, vernalization_params, lethal, lethal_params, sowprec_params,
-                                         photoperiod, photoperiod_params, max_consec_dry_days, dursowing, sowingtemp, additional_conditions])
+                                         photoperiod, photoperiod_params, max_consec_dry_days, dry_day_prec, dursowing, sowingtemp, max_prec_val, max_prec_dur, additional_conditions])
         else:
             process_day_climsuit_memopt([day, len_growing_cycle, temperature, precipitation, plant_params_formulas, plant, wintercrop, water_mask,
                                          int(climate_config['options']['irrigation']), crop_failures[day], vernalization_params, lethal, lethal_params, sowprec_params,
-                                         photoperiod, photoperiod_params, max_consec_dry_days, dursowing, sowingtemp, additional_conditions])
+                                         photoperiod, photoperiod_params, max_consec_dry_days, dry_day_prec, dursowing, sowingtemp, max_prec_val, max_prec_dur, additional_conditions])
     
 
     if len_growing_cycle >= 365:
@@ -669,14 +692,12 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             if len(os.listdir(tmp)) >= 365:
                 break
             
-            """
-            #DEBUG
-            for day in range(365):
-                process_day_concfut(day) 
-            """
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc) as executor:
-                executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))
+            if max_proc == 1:
+                for day in range(365):
+                    process_day_concfut(day) 
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc) as executor:
+                    executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))
             
             collect()        
             break
@@ -734,6 +755,20 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
 
         print(' -> Calculating Suitability')
         fuzzy_clim_growing_cycle_wdoy = np.min([fuzzy_temp_growing_cycle_wdoy, fuzzy_precip_growing_cycle_wdoy, curr_fail, fuzzy_photop_growing_cycle_wdoy], axis=0)
+
+        if climate_config['options'].get('consider_crop_rotation', False) and len_growing_cycle < 365:
+            writesuit = np.copy(fuzzy_clim_growing_cycle_wdoy).astype(np.int8)
+            writesuit[land_sea_mask == 0] = -1
+            writesuit = np.transpose(writesuit, (1, 2, 0))
+            top, left, bottom, right = extent
+            height, width, depth = writesuit.shape
+            transform = from_bounds(left, bottom, right, top, width, height)
+            with rasterio.open(os.path.join(res_path, 'cr_temp.tif'), 'w', driver='GTiff', height=height, width=width, count=depth, dtype=rasterio.int8,
+                               crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+                for i in range(depth):
+                    dst.write(writesuit[:, :, i], i + 1)
+            del writesuit
+
         print(' -> Calculating Suitable Sowing Days')
         if len_growing_cycle >= 365:
             length_of_growing_period = np.zeros_like(fuzzy_clim_growing_cycle_wdoy, dtype=np.int16)
@@ -852,6 +887,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
                 """
                 with concurrent.futures.ThreadPoolExecutor(max_workers=no_threads) as executor:
                     list(executor.map(process_index, valid_indices, chunksize=len(valid_indices)//no_threads))
+
                 start_days[..., 1:] += 1
                 start_days[multiple_cropping < 2, 1] = -1 
                 start_days[multiple_cropping < 2, 2] = -1

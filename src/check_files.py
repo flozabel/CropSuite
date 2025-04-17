@@ -2,6 +2,8 @@ import os
 import rasterio
 import numpy as np
 import sys
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+from pyproj import CRS
 try:
     import nc_tools as nc
 except:
@@ -75,6 +77,9 @@ def print_extent(extent):
     w = str('%.2f' % abs(extent[1])) + ' W' if extent[1] < 0 else str('%.2f' % abs(extent[1])) + ' E'
     e = str('%.2f' % abs(extent[3])) + ' W' if extent[3] < 0 else str('%.2f' % abs(extent[3])) + ' E'
 
+    max_label_width = max(len(w), len(e))
+    padding = " " * (max_label_width - len(w))
+
     output = f'''
               {n}
             x---------x
@@ -84,6 +89,7 @@ def print_extent(extent):
             x---------x
               {s}
     '''
+
     print(output)
 
 
@@ -554,6 +560,26 @@ def get_id_list_start(dict, starts_with) -> list:
     return lst
 
 
+def reproject_geotiff(input_file):
+    with rasterio.open(input_file) as src:
+        current_crs = src.crs
+        target_crs = CRS.from_epsg(4326)
+        if current_crs.to_string() != target_crs.to_string():
+            output_file = os.path.splitext(input_file)[0] + "-wgs.tif"
+            print(f"Reprojecting {os.path.basename(input_file)} from {current_crs} to EPSG:4326 (WGS 1984 / Plate Carree).")
+            transform, width, height = calculate_default_transform(src.crs, target_crs, src.width, src.height, *src.bounds)
+            kwargs = src.meta.copy()
+            kwargs.update({'crs': target_crs, 'transform': transform, 'width': width, 'height': height, 'compress': 'lzw'})
+            with rasterio.open(output_file, 'w', **kwargs) as dst:
+                for i in range(1, src.count + 1):
+                    reproject(source=rasterio.band(src, i), destination=rasterio.band(dst, i), src_transform=src.transform,
+                        src_crs=src.crs, dst_transform=transform, dst_crs=target_crs, resampling=Resampling.nearest)
+            print(f"Reprojection complete. Saved to {output_file}")
+
+            os.remove(input_file)
+            os.rename(output_file, input_file)
+
+
 def check_all_inputs(options: dict) -> list:
     """
     Check and verify all input data specified in the configuration.
@@ -589,15 +615,28 @@ def check_all_inputs(options: dict) -> list:
         soil_extent = [soil_extent[2], soil_extent[0], soil_extent[1], soil_extent[3]]
         min_extent = get_minimum_extent(soil_extent, min_extent)
   
-        #throw_exit_error(f'Error: Invalid {soil} data'+'\n'+f'Path: {soil_path}'+'\n'+f'Weighting Method: {wm}')
-            
+        for tif_file in [f for f in os.listdir(soil_path) if f.endswith('.tif') or f.endswith('.tiff')]:
+            try:
+                reproject_geotiff(os.path.join(soil_path, tif_file))
+            except Exception as e:
+                print(f'Error: Unable reprojecting {tif_file} - {e}')
         print('')
+
+    try:
+        reproject_geotiff(options['files'].get('fine_dem'))
+    except Exception as e:
+        print(f'Error: Unable reprojecting {tif_file} - {e}')
+
+    try:
+        reproject_geotiff(options['files'].get('land_sea_mask'))
+    except Exception as e:
+        print(f'Error: Unable reprojecting {tif_file} - {e}')
 
     if list((np.asarray(min_extent)*100).astype(int)/100) != list((np.asarray(spec_extent)*100).astype(int)/100):
         print('The specified extent cannot be created.\nData is only available for the following extent:')
         print_extent(extent=min_extent)
         #input('Continue anyway?')
-    elif calculate_area(min_extent)<1:
+    elif calculate_area(min_extent)<.01:
         throw_exit_error('The specified extent does not span any area.')
     else:
         print('All input data successfully verified')

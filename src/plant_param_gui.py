@@ -11,7 +11,9 @@ except:
     from src import read_climate_ini as rci
     from src import read_plant_params as rpp
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 from scipy.integrate import cumulative_trapezoid
 
 warnings.filterwarnings('ignore')
@@ -90,7 +92,7 @@ class plant_param_gui(tk.Frame):
         self.memship_cbox.pack(side='left', pady=5, padx=5)
         self.add_memship_but.pack(side='right', pady=5, padx=5)
         self.memship_cbox['values'] = [self.label_dict.get(k, k.capitalize()) for k in self.param_keys]
-        self.memship_var.set([self.label_dict.get(k, k.capitalize()) for k in self.param_keys][0])
+        self.memship_var.set([self.label_dict.get(k, k.capitalize()) for k in self.param_keys][0]) #type:ignore
         self.memship_cbox.bind('<<ComboboxSelected>>', self.membership_changed)
 
         xvals_frm = Frame(root)
@@ -129,8 +131,10 @@ class plant_param_gui(tk.Frame):
         self.varval_left = Entry(left_frame, width=5, textvariable=self.varval_lower, state='disabled', justify='center')
         self.varval_left.pack(pady=5)
 
-        self.fig, self.ax = plt.subplots(figsize=(4, 3))
-        self.fig.set_facecolor('#f0f0f0')
+        #self.fig, self.ax = plt.subplots(figsize=(4, 3))
+        #self.fig.set_facecolor('#f0f0f0')
+        self.fig = Figure(figsize=(4, 3), facecolor='#f0f0f0')
+        self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=canvas_frm)
         self.canvas.get_tk_widget().pack(side='left', padx=5, pady=5)   
 
@@ -166,7 +170,7 @@ class plant_param_gui(tk.Frame):
         self.germ_frm = Frame(root)
         self.germ_frm.pack(fill='x', padx=5)
 
-        self.germ_cb_val = IntVar(root, 1)
+        self.germ_cb_val = IntVar(root, int(self.crop_dict.get('prec_req_after_sow', 0 if self.growing_cycle_var.get() >= 365 else 1) in [1, 'y']))
         self.germ_cb = Checkbutton(self.germ_frm, variable=self.germ_cb_val, text='Germination Requirements', command=self.germination_cb_switched)
         self.germ_but = Button(self.germ_frm, text='Set', width=10, state='normal' if self.germ_cb_val.get() == 1 else 'disabled', command=self.set_germination_requirements)
         self.germ_cb.pack(side='left', padx=5, pady=5)
@@ -186,7 +190,7 @@ class plant_param_gui(tk.Frame):
         self.photo_frm = Frame(root)
         self.photo_frm.pack(fill='x', padx=5)
 
-        self.photo_cb_val = IntVar(root, int(self.crop_dict.get('wintercrop', 'n') in [1, 'y']))
+        self.photo_cb_val = IntVar(root, int(self.crop_dict.get('photoperiod', 'n') in [1, 'y']))
         self.photo_cb = Checkbutton(self.photo_frm, variable=self.photo_cb_val, text='Consider Photoperiod', command=self.photo_cb_switched)
         self.photo_but = Button(self.photo_frm, text='Set', width=10, state='normal' if self.photo_cb_val.get() == 1 else 'disabled', command=self.set_photoperiod_settings)
         self.photo_cb.pack(side='left', padx=5, pady=5)
@@ -209,11 +213,9 @@ class plant_param_gui(tk.Frame):
         self.additionals_but = Button(add_cond_frm, text='Configure additional requirements', width=30, state='normal',
                                       command=self.add_conditions_window)
         self.additionals_but.pack(side='right', padx=5, pady=5)
-
         ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
         ### BOTTOM FRAME ###
-
         self.botton_frame = tk.Frame(root)
         self.botton_frame.pack(fill=tk.X, side='bottom')
 
@@ -289,7 +291,7 @@ class plant_param_gui(tk.Frame):
 
         crop = os.path.splitext(self.plant)[0]
 
-        x, y = int(500 * self.fact), int(200 * self.fact)
+        x, y = int(500 * self.fact), int(250 * self.fact)
         self.letthres_root.geometry(f'{x}x{y}+{(self.letthres_root.winfo_screenwidth() - x) // 2}+{(self.letthres_root.winfo_screenheight() - y) // 2}')
         self.letthres_root.title(f'Lethal Thresholds - {crop}')
         self.letthres_root.resizable(0, 0) #type:ignore
@@ -304,13 +306,10 @@ class plant_param_gui(tk.Frame):
         frm1 = Frame(self.letthres_root)
         frm1.pack(fill='x', expand=0)
         Label(frm1, text='Not more than').pack(side='left', padx=5, pady=5)
-
-        self.ent_consec_days_below_dur = IntVar(self.letthres_root, self.crop_dict.get('lethal_min_duration', 7))
+        self.ent_consec_days_below_dur = IntVar(self.letthres_root, self.crop_dict.get('lethal_min_temp_duration', 7))
         sbx_temp_below_dur = Spinbox(frm1, from_=1, to=int(self.crop_dict.get('growing_cycle', 1)), width=7, textvariable=self.ent_consec_days_below_dur, justify='center')
         sbx_temp_below_dur.pack(side='left', padx=5, pady=5)
-
         Label(frm1, text='consecutive days below').pack(side='left', padx=5, pady=5)
-
         self.ent_consec_days_below_tmp = IntVar(self.letthres_root, self.crop_dict.get('lethal_min_temp', 5))
         ent_temp_below_tmp = Entry(frm1, textvariable=self.ent_consec_days_below_tmp, width=7, justify='center')
         ent_temp_below_tmp.pack(side='left', padx=5, pady=5)
@@ -319,13 +318,10 @@ class plant_param_gui(tk.Frame):
         frm2 = Frame(self.letthres_root)
         frm2.pack(fill='x', expand=0)
         Label(frm2, text='Not more than').pack(side='left', padx=5, pady=5)
-
-        self.ent_consec_days_above_dur = IntVar(self.letthres_root, self.crop_dict.get('lethal_max_duration', 5))
+        self.ent_consec_days_above_dur = IntVar(self.letthres_root, self.crop_dict.get('lethal_max_temp_duration', 5))
         sbx_temp_above_dur = Spinbox(frm2, from_=1, to=int(self.crop_dict.get('growing_cycle', 1)), width=7, textvariable=self.ent_consec_days_above_dur, justify='center')
         sbx_temp_above_dur.pack(side='left', padx=5, pady=5)
-
         Label(frm2, text='consecutive days above').pack(side='left', padx=5, pady=5)
-
         self.ent_consec_days_above_tmp = IntVar(self.letthres_root, self.crop_dict.get('lethal_max_temp', 32))
         ent_temp_above_tmp = Entry(frm2, textvariable=self.ent_consec_days_above_tmp, width=7, justify='center')
         ent_temp_above_tmp.pack(side='left', padx=5, pady=5)
@@ -334,11 +330,26 @@ class plant_param_gui(tk.Frame):
         frm3 = Frame(self.letthres_root)
         frm3.pack(fill='x', expand=0)
         Label(frm3, text='Not more than').pack(side='left', padx=5, pady=5)
-
-        self.ent_consec_dry_days_dur = IntVar(self.letthres_root, self.crop_dict.get('consecutive_dry_days', 21))
+        self.ent_consec_dry_days_dur = IntVar(self.letthres_root, self.crop_dict.get('lethal_min_prec_duration', 21))
         sbx_temp_above_dur = Spinbox(frm3, from_=1, to=int(self.crop_dict.get('growing_cycle', 1)), width=7, textvariable=self.ent_consec_dry_days_dur, justify='center')
         sbx_temp_above_dur.pack(side='left', padx=5, pady=5)
-        Label(frm3, text='consecutive dry days').pack(side='left', padx=5, pady=5)
+        Label(frm3, text='consecutive days below').pack(side='left', padx=5, pady=5)
+        self.ent_consec_dry_days_value = IntVar(self.letthres_root, self.crop_dict.get('lethal_min_prec', 1))
+        ent_prec_below = Entry(frm3, textvariable=self.ent_consec_dry_days_value, width=7, justify='center')
+        ent_prec_below.pack(side='left', padx=5, pady=5)
+        Label(frm3, text='mm/day').pack(side='left', padx=5, pady=5)
+
+        frm4 = Frame(self.letthres_root)
+        frm4.pack(fill='x', expand=0)
+        Label(frm4, text='Not more than').pack(side='left', padx=5, pady=5)
+        self.max_prec_val = IntVar(self.letthres_root, self.crop_dict.get('lethal_max_prec', 100))
+        self.max_prec_dur = IntVar(self.letthres_root, self.crop_dict.get('lethal_max_prec_duration', 3))
+        ent_prev_dur = Spinbox(frm4, from_=1, to=int(self.crop_dict.get('growing_cycle', 1)), textvariable=self.max_prec_dur, width=7, justify='center')
+        ent_prev_dur.pack(side='left', padx=5, pady=5)
+        Label(frm4, text='consecutive days above').pack(side='left', padx=5, pady=5)
+        sbx_prec_above_val = Spinbox(frm4, from_=1, to=2000, width=7, textvariable=self.max_prec_val, justify='center')
+        sbx_prec_above_val.pack(side='left', padx=5, pady=5)
+        Label(frm4, text='mm/day').pack(side='left', padx=5, pady=5)   
 
         botton_frame = tk.Frame(self.letthres_root)
         botton_frame.pack(fill=tk.X, side='bottom')
@@ -353,12 +364,23 @@ class plant_param_gui(tk.Frame):
         lethal_max_duration = self.ent_consec_days_above_dur.get()
         lethal_max_temp = self.ent_consec_days_above_tmp.get()        
         consecutive_dry_days = self.ent_consec_dry_days_dur.get()
+        dry_day_prec = self.ent_consec_dry_days_value.get()
+        max_prec_val = self.max_prec_val.get()
+        max_prec_dur = self.max_prec_dur.get()
 
-        add_dict = {'lethal_thresholds': 1, 'lethal_min_duration': lethal_min_duration, 'lethal_min_temp': lethal_min_temp,
-                    'lethal_max_duration': lethal_max_duration, 'lethal_max_temp': lethal_max_temp,
-                    'consecutive_dry_days': consecutive_dry_days}  
+        add_dict = {'lethal_min_temp_duration': lethal_min_duration, 'lethal_min_temp': lethal_min_temp,
+                    'lethal_max_temp_duration': lethal_max_duration, 'lethal_max_temp': lethal_max_temp,
+                    'lethal_min_prec_duration': consecutive_dry_days, 'lethal_min_prec': dry_day_prec, 'lethal_max_prec': max_prec_val,
+                    'lethal_max_prec_duration': max_prec_dur}  
+        
+        self.crop_dict['lethal_thresholds'] = self.lethals_cb_val.get()
         for key, value in add_dict.items():
             self.crop_dict[key] = value
+
+        if self.lethals_cb_val.get() == 0:
+            for key in add_dict.keys():
+                self.crop_dict.pop(key, None)
+
         self.letthres_root.destroy()
 
     def set_photoperiod_settings(self):
@@ -501,13 +523,17 @@ class plant_param_gui(tk.Frame):
     def add_conditions_window(self):
         self.addcon_root = Tk()
 
-        crop = self.crop_dict.get('name', '').capitalize()
+        crop = str(self.plant).split('.')[0].capitalize()
 
         x, y = int(550 * self.fact), int(400 * self.fact)
         self.addcon_root.geometry(f'{x}x{y}+{(self.addcon_root.winfo_screenwidth() - x) // 2}+{(self.addcon_root.winfo_screenheight() - y) // 2}')
         self.addcon_root.title(f'Additional Conditions - {crop}')
         self.addcon_root.resizable(0, 0) #type:ignore
         self.addcon_root.focus_force()
+
+        self.cons_preproc_var = IntVar(self.addcon_root, int(self.crop_dict.get('consider_in_preproc', 0) in [1, 'y']))
+        cons_preproc_cb = Checkbutton(self.addcon_root, text='Consider in Preprocessing', variable=self.cons_preproc_var)
+        cons_preproc_cb.pack(anchor='w', padx=5, pady=5)
 
         main_frame = tk.Frame(self.addcon_root)
         main_frame.pack(fill=tk.BOTH, expand=1, padx=5, pady=5)
@@ -738,7 +764,8 @@ class plant_param_gui(tk.Frame):
             self.ax.axhspan(1.0, 1.1, facecolor='lightgray', alpha=0.5)
             self.ax.set_ylim(-0.1, 1.1)
             self.ax.grid()
-            plt.tight_layout()
+            self.fig.tight_layout() #type:ignore
+            #plt.tight_layout()
             self.canvas.draw() #type:ignore
         except Exception as e:
             print(e)
@@ -747,8 +774,9 @@ class plant_param_gui(tk.Frame):
         winter_keys = ['wintercrop', 'vernalization_effective_days', 'vernalization_tmax', 'vernalization_tmin',
                        'frost_resistance_days', 'frost_resistance', 'days_to_vernalization']
         germ_keys = ['prec_req_after_sow', 'prec_req_days', 'temp_for_sow_duration', 'temp_for_sow']
-        lethal_keys = ['lethal_thresholds', 'lethal_min_duration', 'lethal_min_temp',
-                    'lethal_max_duration', 'lethal_max_temp', 'consecutive_dry_days']  
+        lethal_keys = ['lethal_thresholds', 'lethal_min_temp_duration', 'lethal_min_temp',
+                    'lethal_max_temp_duration', 'lethal_max_temp', 'lethal_min_prec_duration', 'lethal_min_prec',
+                    'lethal_max_prec', 'lethal_max_prec_duration']  
         photo_keys = ['photoperiod', 'minimum_sunlight_hours', 'maximum_sunlight_hours']
 
         rem_keys = []
@@ -764,6 +792,8 @@ class plant_param_gui(tk.Frame):
         for key in rem_keys:
             self.crop_dict.pop(key, None)
 
+        self.crop_dict['growing_cycle'] = self.growing_cycle_var.get()
+
         with open(os.path.join(self.config_file['files'].get('plant_param_dir'), 'available', self.plant), 'w') as write_file:
             write_file.write(f'name = \t\t{os.path.splitext(self.plant)[0].lower()}\n')
             for key, value in self.crop_dict.items():
@@ -776,6 +806,8 @@ class plant_param_gui(tk.Frame):
                 else:
                     value_str = str(value)
                 write_file.write(f'{key} = \t\t{value_str}\n')
+            if hasattr(self, 'cons_preproc_var') and self.cons_preproc_var.get() == 1:
+                write_file.write(f'consider_in_preproc = \t\t{self.cons_preproc_var.get()}\n')
         # self.root.destroy()
 
     def add_memship(self):
@@ -996,7 +1028,6 @@ def add_name(label):
     Button(name_win, text='Ok', command=ret_val).pack(pady=5,fill='x')
     name_win.wait_window(name_win)
     return vl
-
 
 def open_gui(config_ini_path, plant_inf):
     root = Tk()

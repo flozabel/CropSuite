@@ -7,7 +7,8 @@ from dask.diagnostics import ProgressBar #type:ignore
 from datetime import datetime
 import rasterio
 from dask.distributed import Client
-    
+import netCDF4 as nc4
+from datetime import datetime
 
 def read_area_from_netcdf(filename, extent, variable='data', day_range=[-1, -1]):
     # extent = y_max, x_min, y_min, x_max
@@ -44,16 +45,20 @@ def read_area_from_netcdf(filename, extent, variable='data', day_range=[-1, -1])
         nodata = False
     
     if isinstance(day_range, list):
+        lat_slc = slice(y_max, y_min) if ds.lat[0] > ds.lat[-1] else slice(y_min, y_max)
+        lon_slc = slice(x_min, x_max) if ds.lon[0] < ds.lon[-1] else slice(x_max, x_min)
         if day_range[1] > -1:
-            data = ds.sel(**{lat_dim: slice(y_max, y_min), lon_dim: slice(x_min, x_max), time_dim: slice(day_range[0]+1, day_range[1]+1)}) #type:ignore
+            data = ds.sel(**{lat_dim: lat_slc, lon_dim: lon_slc, time_dim: slice(day_range[0]+1, day_range[1]+1)}) #type:ignore
         else:
-            data = ds.sel(**{lat_dim: slice(y_max, y_min), lon_dim: slice(x_min, x_max)}) #type:ignore
+            data = ds.sel(**{lat_dim: lat_slc, lon_dim: lon_slc}) #type:ignore
 
     elif isinstance(day_range, int):
+        lat_slc = slice(y_max, y_min) if ds.lat[0] > ds.lat[-1] else slice(y_min, y_max)
+        lon_slc = slice(x_min, x_max) if ds.lon[0] < ds.lon[-1] else slice(x_max, x_min)
         if day_range > -1:
-            data = ds.sel(**{lat_dim: slice(y_max, y_min), lon_dim: slice(x_min, x_max), time_dim: day_range+1}) #type:ignore
+            data = ds.sel(**{lat_dim: lat_slc, lon_dim: lon_slc, time_dim: day_range+1}) #type:ignore
         else:
-            data = ds.sel(**{lat_dim: slice(y_max, y_min), lon_dim: slice(x_min, x_max)}) #type:ignore
+            data = ds.sel(**{lat_dim: lat_slc, lon_dim: lon_slc}) #type:ignore
 
     else:
         print('error')
@@ -338,9 +343,9 @@ def read_area_from_netcdf_list(downscaled_files, overlap = False, var_name = 'da
             else:
                 return np.concatenate(ds_list, axis=0)
 
-
+"""
 def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, compress=False, complevel=4, info_text=False, var_name='data', nodata_value=False, unlimited=None):
-    """
+    '''
     Write data to a NetCDF4 file using xarray.
 
     Parameters:
@@ -352,7 +357,7 @@ def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, comp
 
     Returns:
     - None
-    """    
+    '''    
 
     if len(dimensions) != data.ndim:
         print(f'Specified Dimensions {dimensions} not matching data dimensions {data.shape}')
@@ -404,7 +409,7 @@ def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, comp
         else:
             ds.attrs['_FillValue'] = 0
             
-    ds.attrs['Institution'] = 'University of Basel, Departement for Environmental Sciences'
+    ds.attrs['Institution'] = 'University of Basel, Department of Environmental Sciences'
     ds.attrs['Contact'] = 'Florian Zabel & Matthias Knuettel, florian.zabel@unibas.ch'
     ds.attrs['Creation_Time'] = f'{datetime.now().strftime("%d.%m.%Y - %H:%M")}'
     ds.attrs['Info'] = 'Created by CropSuite v1'
@@ -422,6 +427,75 @@ def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, comp
             ds.to_netcdf(filename, format='NETCDF4', engine='netcdf4', unlimited_dims=unlimited)
         else:
             ds.to_netcdf(filename, format='NETCDF4', engine='netcdf4')
+    return filename
+"""
+
+def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, compress=False, complevel=4, info_text=False, var_name='data', nodata_value=False, unlimited=None):
+    if len(dimensions) != data.ndim:
+        raise ValueError(f'Specified dimensions {dimensions} do not match data dimensions {data.shape}')
+    
+    if extent:
+        try:
+            latitudes = np.linspace(float(extent.get('top')), float(extent.get('bottom')), data.shape[0])
+            longitudes = np.linspace(float(extent.get('left')), float(extent.get('right')), data.shape[1])            
+        except:
+            try:
+                extent = list(extent.values())
+            except:
+                pass
+            latitudes = np.linspace(np.max([extent[0], extent[2]]), np.min([extent[0], extent[2]]), data.shape[0])
+            longitudes = np.linspace(np.min([extent[1], extent[3]]), np.max([extent[1], extent[3]]), data.shape[1])
+    else:
+        latitudes, longitudes = np.arange(data.shape[0]), np.arange(data.shape[1])
+    
+    # Ensure correct data type
+    if data.dtype == np.float16:
+        data = data.astype(np.float32)
+    elif data.dtype == np.int8:
+        data = data.astype(np.int16)
+    
+    fill_value = 0
+    if nodata_value:
+        fill_value = nodata_value
+    elif np.isnan(data).any():
+        fill_value = np.nan
+    elif np.min(data) == -32767:
+        fill_value = -32767
+    
+    with nc4.Dataset(filename, 'w', format='NETCDF4') as ds: #type:ignore
+        
+        # Create dimensions
+        ds.createDimension('lat', data.shape[0])
+        ds.createDimension('lon', data.shape[1])
+        for dim in range(2, data.ndim):
+            ds.createDimension(dimensions[dim], data.shape[dim])
+        
+        # Create coordinate variables
+        lat_var = ds.createVariable('lat', 'f4', ('lat',))
+        lon_var = ds.createVariable('lon', 'f4', ('lon',))
+        lat_var[:] = latitudes
+        lon_var[:] = longitudes
+        
+        # Add attributes to coordinates
+        lat_var.units = 'degrees_north'
+        lon_var.units = 'degrees_east'
+        lat_var.long_name = 'latitude'
+        lon_var.long_name = 'longitude'
+        lat_var.axis = 'Y'
+        lon_var.axis = 'X'
+        
+        # Create data variable
+        var_dims = tuple(dimensions)
+        var = ds.createVariable(var_name, data.dtype, var_dims, zlib=compress, complevel=complevel, fill_value=fill_value)
+        var[:] = data
+        
+        # Add global attributes
+        ds.setncattr('Institution', 'University of Basel, Department of Environmental Sciences')
+        ds.setncattr('Contact', 'Florian Zabel & Matthias Knuettel, florian.zabel@unibas.ch')
+        ds.setncattr('Creation_Time', datetime.now().strftime("%d.%m.%Y - %H:%M"))
+        ds.setncattr('Info', 'Created by CropSuite v1.0.1')
+        if isinstance(info_text, str):
+            ds.setncattr('Info', info_text)
     return filename
 
 
@@ -477,7 +551,7 @@ def create_append_netcdf(filename, data, dimensions=['lat', 'lon'], extent=None,
         else:
             ds.attrs['_FillValue'] = 0
             
-    ds.attrs['Institution'] = 'University of Basel, Departement for Environmental Sciences'
+    ds.attrs['Institution'] = 'University of Basel, Department of Environmental Sciences'
     ds.attrs['Contact'] = 'Florian Zabel & Matthias Knuettel, florian.zabel@unibas.ch'
     ds.attrs['Creation_Time'] = f'{datetime.now().strftime("%d.%m.%Y - %H:%M")}'
     ds.attrs['Info'] = 'Created by CropSuite v1'
@@ -561,7 +635,7 @@ def merge_netcdf_files(file_list, output_file, overlap=0, nodata_value=False, in
     if isinstance(nodata_value, (int, float)):
         merged_data.attrs['_FillValue'] = nodata_value
 
-    ds.attrs['Institution'] = 'University of Basel, Departement for Environmental Sciences'
+    ds.attrs['Institution'] = 'University of Basel, Department of Environmental Sciences'
     ds.attrs['Contact'] = 'Florian Zabel, florian.zabel@unibas.ch'
     ds.attrs['Creation_Time'] = f'{datetime.now().strftime("%d.%m.%Y - %H:%M")}'
     ds.attrs['Info'] = 'Created by CropSuite v1'

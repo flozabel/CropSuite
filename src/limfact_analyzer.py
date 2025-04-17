@@ -4,10 +4,6 @@ import tkinter as tk
 import os
 import warnings
 import numpy as np
-try:
-    import read_climate_ini as rci
-except:
-    from src import read_climate_ini as rci
 import rasterio
 from PIL import Image, ImageTk
 from matplotlib.figure import Figure
@@ -21,10 +17,12 @@ import cartopy.feature as cfeature
 warnings.filterwarnings('ignore')
 
 class limfact_analyzer():
-    def __init__(self, config_ini, current_path):
+    def __init__(self, current_path, config_ini=None):
+        
         self.current_path = current_path
+
         self.fact = 1 if os.name == 'nt' else 1.25
-        self.config_file = rci.read_ini_file(config_ini)
+        #self.config_file = rci.read_ini_file(config_ini)
 
         self.root = Tk()
         self.root.title('CropSuite - Data Viewer')
@@ -38,8 +36,10 @@ class limfact_analyzer():
 
         self.limiting_factors = self.get_limiting_factors(self.current_path)
         self.data_array, self.x_min, self.x_max, self.y_min, self.y_max, self.nodata = self.get_all_lim_factors(self.current_path)
+        if self.data_array.dtype in [np.int8, np.int16, np.int32, np.int64, np.uint8, np.uint16, np.uint32, np.uint64, int]: 
+            self.data_array = self.data_array.astype(np.float16)
         self.data_array[self.data_array < 0] = np.nan
-        self.data_array[0] = 100 - self.data_array[0]
+        #self.data_array = 100 - self.data_array[0]
         self.data_array -= 100
         self.nan_mask = np.isnan(self.data_array)
 
@@ -158,8 +158,8 @@ class limfact_analyzer():
         spb2_lab.pack(side='right', padx=5, fill='x', anchor='e')
         self.spb2.pack(side='right', padx=5, fill='x', anchor='e')
         
-        self.trans_cb.trace("w", self.cb_changed)
-        self.rad_vals.trace("w", self.rad_changed)
+        self.trans_cb.trace_add("write", self.cb_changed)
+        self.rad_vals.trace_add("write", self.rad_changed)
 
         smooth_cb_frm = Frame(main_frame)
         smooth_cb_frm.pack(side='top', pady=5, fill='x')
@@ -173,7 +173,7 @@ class limfact_analyzer():
         self.smooth_spb.pack(side='right', padx=5, fill='x', anchor='e')
         ttk.Separator(main_frame, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
-        self.smooth_val.trace("w", self.smooth_changed)
+        self.smooth_val.trace_add("write", self.smooth_changed)
 
         pointplot_frm = Frame(main_frame)
         pointplot_frm.pack(side='top', pady=5, fill='x')
@@ -195,7 +195,7 @@ class limfact_analyzer():
         self.x_spb.pack(side='left', padx=5, fill='x', expand=True)
         elab.pack(side='left', padx=5)
 
-        self.pointplot_val.trace("w", self.plotpoint_changed)
+        self.pointplot_val.trace_add("write", self.plotpoint_changed)
 
         ttk.Separator(main_frame, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
@@ -280,7 +280,7 @@ class limfact_analyzer():
         min_val = -100
         max_val = 0
         label = f'Degree of Limitation - {self.lim_val.get()}'
-        projection = self.proj_list.get(self.proj_sel_var.get(), ccrs.PlateCarree)()
+        projection = self.proj_list.get(self.proj_sel_var.get(), ccrs.PlateCarree)() #type:ignore
         colormap = self.colormap_list.get(self.cmap_sel_var.get(), 'YlOrRd')
         if isinstance(colormap, list):
             cmap = clr.LinearSegmentedColormap.from_list('', colormap)
@@ -296,7 +296,7 @@ class limfact_analyzer():
 
         im = ax.imshow(data, extent=(self.x_min, self.x_max, self.y_min, self.y_max), origin='upper', cmap=cmap, transform=ccrs.PlateCarree(), vmin=min_val, vmax=max_val, interpolation='bilinear') #type:ignore
         if (abs(self.x_min) + abs(self.x_max) >= 300) or (abs(self.y_min) + abs(self.y_max) >= 120):
-            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree())
+            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree()) #type:ignore
         else:
             ax.set_extent((self.x_min, self.x_max, self.y_min, self.y_max), crs=ccrs.PlateCarree()) #type:ignore
         try:
@@ -332,7 +332,7 @@ class limfact_analyzer():
         save_file = os.path.join(self.current_path, f'limitingfactors_{self.lim_val.get()}.png')
         legend_file = os.path.join(self.current_path, f'limitingfactors_{self.lim_val.get()}_legend.png')
         fig.savefig(save_file, bbox_inches='tight', pad_inches=.4, dpi=300)
-        fig_legend.savefig(legend_file, bbox_inches='tight', dpi=300, transparent=True)
+        fig_legend.savefig(legend_file, bbox_inches='tight', dpi=300, transparent=True) #type:ignore
         fig_legend.clear()
         ax_legend.clear()
         del fig_legend, ax_legend
@@ -342,7 +342,7 @@ class limfact_analyzer():
         if self.trans_cb.get() == 1:
             ver_hor_val = self.rad_vals.get()
             merdian = self.spb1_val.get() if ver_hor_val == 0 else self.spb2_val.get()
-            self.transect, self.savefig = self.plot_transect(ver_hor_val, merdian)
+            self.transect, self.savefig = self.plot_transect(ver_hor_val, merdian) #type:ignore
             currfig = self.merge_plot_transect(self.savefig, self.transect)
         elif self.pointplot_val.get() == 1:
             self.savefig, self.legend = self.plot_data(point=[self.y_val.get(), self.x_val.get()])
@@ -549,4 +549,4 @@ class limfact_analyzer():
 
 if __name__ == '__main__':
     pass
-    #limfact_analyzer(r"U:\Source Code\CropSuite\config.ini", r'U:\Source Code\CropSuite\results\isimip_europe_hrvar_var\Area_57N-4E-43N16E\winterrapeseed')
+    #limfact_analyzer(r'results\brazil\access-esm1_var\Area_-6N-55E--7N-54E\maize')

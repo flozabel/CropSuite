@@ -14,8 +14,7 @@ except:
 import concurrent.futures
 import math
 import warnings
-from scipy.spatial import cKDTree
-from scipy.interpolate import RegularGridInterpolator
+from skimage import transform as skt
 warnings.filterwarnings("ignore")
 
 
@@ -67,7 +66,7 @@ def interpolate_temperature(config_file, coarse_dem, fine_dem, temp_data, domain
         temp_data = temperature_interpolation_worldclim(factors_file, fine_dem.shape, temp_data, domain)
 
     elif interpolation_method == 3:
-        temp_data = temperature_interpolation_height_regression(config_file, fine_dem, prec_data, coarse_dem, temp_data)
+        temp_data = temperature_interpolation_height_regression(config_file, fine_dem, prec_data, coarse_dem, temp_data) # type:ignore
     
     temp_data[(temp_data < -500) | (temp_data > 500)] = -32767
     temp_data[np.isnan(land_sea_mask)] = -32767
@@ -114,9 +113,9 @@ def temperature_interpolation_height_regression(config_file, fine_dem, precipita
 
     precipitation = nc.read_area_from_netcdf_list(precipitation_files, overlap=False, extent=domain, dayslices=prec_dailyfiles)
 
-    arguments = [(day, fine_dem, precipitation[..., day], precip_day_sum_thres, coarse_dem, window_size, temp_data[day],
+    arguments = [(day, fine_dem, precipitation[..., day], precip_day_sum_thres, coarse_dem, window_size, temp_data[day], #type:ignore
                     use_gradient, saturation_adiabatic_gradient, dryadiabatic_gradient, bias_thres) for day in range(365)
-              if not os.path.exists(os.path.join(os.getcwd(), 'temp', f'{day}.npy'))]
+              if not os.path.exists(os.path.join(os.getcwd(), 'temp', f'{day}.npy'))] #type:ignore
     
     no_threads, _ = dt.get_cpu_ram()
     max_proc = np.clip(int(no_threads-1), 1, no_threads)
@@ -229,8 +228,13 @@ def calculate_temp_factors(fine_dem_shape, coarse_dem_shape, world_clim_data_dir
         nan_mask = np.isnan(world_clim_data)
         world_clim_data = world_clim_data.astype(np.float16)
         world_clim_data = dt.fill_nan_nearest(world_clim_data)
+
+        if world_clim_data.shape[0] != fine_dem_shape[0]: #type:ignore
+            world_clim_data = skt.resize(world_clim_data, fine_dem_shape, order=1, mode='edge', anti_aliasing=False).astype(np.float16)
+            nan_mask = dt.interpolate_nanmask(nan_mask, fine_dem_shape)
+
         world_clim_data_coarse = dt.resize_array_mean(world_clim_data, coarse_dem_shape).astype(np.float16)
-        world_clim_data_coarse = dt.resize_array_interp(world_clim_data_coarse, world_clim_data.shape)[0].astype(np.float16) #type:ignore
+        world_clim_data_coarse = skt.resize(world_clim_data_coarse, world_clim_data.shape, order=1, mode='edge', anti_aliasing=False) #type:ignore
 
         # Calculate Factor
         if world_clim_data.shape[0] != fine_dem_shape[0]: #type:ignore

@@ -4,16 +4,23 @@ import read_climate_ini as rci
 
 
 class ParamGUI:
-    def __init__(self, config_file):
+    def __init__(self, config_file, parent_frame=None):
+        super().__init__()
         self.fact = 1 if os.name == 'nt' else 1.25
         self.config_file = config_file
         self.config_dict = rci.read_ini_file(config_file)
         self.param_dict = None
-        self.param_window = Tk()
-        self.setup_window()
+        self.parent_frame = parent_frame
+        if parent_frame:
+            self.param_window = parent_frame
+        else:
+            self.param_window = Tk()
+            self.param_window.title("Parameter GUI")
+            self.setup_window()
         self.create_widgets()
         self.load_initial_params()
-        self.param_window.mainloop()
+        if not parent_frame:
+            self.param_window.mainloop()
 
     def load_initial_params(self):
         """Load initial parameters from the configuration dictionary and set up default values in the GUI."""
@@ -42,7 +49,8 @@ class ParamGUI:
 
     def create_widgets(self):
         font12 = 'Helvetica 12'
-        Label(self.param_window, text='Parameter Datasets\n', font=f'{font12} bold').pack(anchor='w', padx=5, pady=5)
+        if not self.parent_frame:
+            Label(self.param_window, text='Parameter Datasets\n', font=f'{font12} bold').pack(anchor='w', padx=5, pady=5)
         self.create_param_selector()
         ttk.Separator(self.param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
         self.create_directory_selector()
@@ -63,7 +71,7 @@ class ParamGUI:
         self.dropdown_param = StringVar(self.param_window)
         self.dropdown_param.set(self.vals[0])
         self.previous_value = self.vals[0]
-        self.dropdown_param.trace("w", self.on_change)
+        self.dropdown_param.trace_add('write', self.on_change)
         self.param_dict = self.config_dict.get(f'parameters.{self.vals[0]}')
         self.param_selector = ttk.Combobox(self.param_window, textvariable=self.dropdown_param, values=self.vals, state="readonly")
         self.param_selector.pack(anchor='w', padx=5, pady=5, fill='x')
@@ -145,7 +153,7 @@ class ParamGUI:
 
     def create_conversion_factor(self):
         self.convfact_val = DoubleVar(self.param_window, float(self.param_dict.get('conversion_factor'))) #type:ignore
-        #self.convfact_val.trace("w", self.auto_save)
+        #self.convfact_val.trace_add('write', self.auto_save)
 
         frame = Frame(self.param_window)
         frame.pack(anchor='w', padx=5, pady=5, fill='x')
@@ -154,7 +162,7 @@ class ParamGUI:
 
     def create_no_data_entry(self):
         self.nodata_val = DoubleVar(self.param_window, self.param_dict.get('no_data')) #type:ignore
-        #self.nodata_val.trace("w", self.auto_save)
+        #self.nodata_val.trace_add('write', self.auto_save)
 
         frame = Frame(self.param_window)
         frame.pack(anchor='w', padx=5, pady=5, fill='x')
@@ -186,10 +194,15 @@ class ParamGUI:
     def create_buttons(self):
         but_frame = Frame(self.param_window)
         but_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-        Button(but_frame, text='Save', command=lambda: self.auto_save(close=True)).pack(side='left')
-        Button(but_frame, text='Add', command=self.add_param).pack(side='left', padx=5)
-        Button(but_frame, text='Remove', command=self.rem_param).pack(side='left', padx=5)
-        Button(but_frame, text='Exit', command=lambda: self.param_window.destroy()).pack(side='right')
+        if self.parent_frame:
+            Button(but_frame, text='Save Parameter Configuration', command=lambda: self.auto_save(close=False)).pack(side='right', padx=5)
+            Button(but_frame, text='Add', command=self.add_param).pack(side='left', padx=5)
+            Button(but_frame, text='Remove', command=self.rem_param).pack(side='left', padx=5)
+        else:
+            Button(but_frame, text='Save', command=lambda: self.auto_save(close=True)).pack(side='left')
+            Button(but_frame, text='Add', command=self.add_param).pack(side='left', padx=5)
+            Button(but_frame, text='Remove', command=self.rem_param).pack(side='left', padx=5)
+            Button(but_frame, text='Exit', command=lambda: self.param_window.destroy()).pack(side='right')         
 
     def select_param_dir(self):
         print('Select Parameter Directory')

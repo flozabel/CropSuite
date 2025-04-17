@@ -23,9 +23,10 @@ from src import check_prereqs as cp
 from src import read_climate_ini as rci
 from src import data_tools as dt
 from src import nc_tools as nc
-from src import preproc_gui as ppgui
 from src import param_gui as pargui
 from src import limfact_analyzer as limfa
+from src import viewer
+from src import check_versions as cv
 import numpy as np
 from PIL import Image, ImageTk
 import subprocess
@@ -39,21 +40,34 @@ from matplotlib.patches import Patch
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.figure import Figure
-from scipy.interpolate import interp2d
-from matplotlib.patches import Rectangle
 from datetime import datetime
 import warnings
 import xarray as xr
 from src import plant_param_gui
+from src import config_gui as cfg
 warnings.filterwarnings('ignore')
 
-version = '1.0'
-date = '2024-12-12'
+version = '1.3.0'
+date = '2025-04-17'
 current_cfg = ''
 
 plant_param_dir = ''
 
-loading_gif = os.path.join('src', 'loading.gif')
+class Tee:
+    def __init__(self, filename):
+        self.file = open(filename, 'w')
+        self.stdout = sys.stdout
+
+    def write(self, message):
+        self.stdout.write(message)
+        self.file.write(message)
+
+    def flush(self):
+        self.stdout.flush()
+        self.file.flush()
+
+    def close(self):
+        self.file.close()
 
 def get_screen_resolution():
     results = str(subprocess.Popen(['system_profiler SPDisplaysDataType'],stdout=subprocess.PIPE, shell=True).communicate()[0])
@@ -87,8 +101,6 @@ class CropSuiteGui:
         self.font20 = f'Helvetica 20'
 
         self.image_unibas = PhotoImage(file=os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'unibas.png')), master=self.window)
-        #self.image_cgiar = PhotoImage(file=os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'cgiar.png')), master=self.window)
-
         self.setup_ui(config_ini)
 
 
@@ -98,11 +110,9 @@ class CropSuiteGui:
         Label(self.window, text='CropSuite\n', font=self.font18 + ' bold').pack()
         Label(self.window, text=f'Version {version}').pack()
         Label(self.window, text=date+'\n').pack()
-        Label(self.window, text='Florian Zabel & Matthias Knüttel\n').pack()
+        Label(self.window, text='Matthias Knüttel & Florian Zabel\n').pack()
         Label(self.window, image=self.image_unibas).pack()
-        #Label(self.window, text='\nIn cooperation with:').pack()
-        #Label(self.window, image=self.image_cgiar).pack()
-        Label(self.window, text='\n© All rights reserved\n').pack()
+        Label(self.window, text='\n© 2023-2025 All rights reserved\n').pack()
 
         frame = Frame(self.window)
         frame.pack()
@@ -113,48 +123,27 @@ class CropSuiteGui:
 
         empty = Label(self.window, text='', fg=self.yellow, font=self.font12 + ' bold', anchor='w')
         empty.pack()
-
-        #self.libraries = Label(self.window, text='  ☐  Checking required Libraries', fg=self.gray, font=self.font12 + ' bold', anchor='w')
         self.libraries = Label(self.window, text='  ', fg=self.gray, font=self.font12 + ' bold', anchor='w')
         self.libraries.pack(anchor='w')
-
-        #self.check_cfg_ini = Label(self.window, text='  ☐  Checking config.ini', fg=self.gray, font=self.font12 + ' bold', anchor='w')
         self.check_cfg_ini = Label(self.window, text='  ', fg=self.gray, font=self.font12 + ' bold', anchor='w')
         self.check_cfg_ini.pack(anchor='w')
-
-        #self.check_inputs = Label(self.window, text='  ☐  Checking all input files', fg=self.gray, font=self.font12 + ' bold', anchor='w')
         self.check_inputs = Label(self.window, text='  ', fg=self.gray, font=self.font12 + ' bold', anchor='w')
         self.check_inputs.pack(anchor='w')
-
-        #self.all_checked = Label(self.window, text='\n  All requirements successfully checked!', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.all_checked = Label(self.window, text=' ', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.all_checked.pack(anchor='w')
-
-        #self.downscaling = Label(self.window, text='\n  ☑  Downscaling Completed!', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.downscaling = Label(self.window, text=' ', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.downscaling.pack(anchor='w')
-
-        #self.extent = Label(self.window, text='\n  Current Extent:', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.extent = Label(self.window, text=' ', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.extent.pack(anchor='w')
-
-        #self.clim_suit = Label(self.window, text='  ☑  Climate Suitability Calculation Completed!', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.clim_suit = Label(self.window, text='  ', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.clim_suit.pack(anchor='w')
-
-        #self.crop_suit = Label(self.window, text='  ☑  Crop Suitability Calculation Completed!', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.crop_suit = Label(self.window, text='  ', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.crop_suit.pack(anchor='w')
-
-        #self.merge = Label(self.window, text='  ☑  Merging files!', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.merge = Label(self.window, text='  ', fg=self.invisible, font=self.font12 + ' bold', anchor='w')
         self.merge.pack(anchor='w')
-
-        #self.finish = Label(self.window, text='  Completed!', fg=self.invisible, font=self.font14 + ' bold', anchor='w')
         self.finish = Label(self.window, text='  ', fg=self.invisible, font=self.font14 + ' bold', anchor='w')
         self.finish.pack(anchor='w')
 
-        # self.setup_buttons()
         self.run_proc()
         self.window.mainloop()
         
@@ -166,9 +155,20 @@ class CropSuiteGui:
         self.set_config_ini(config_file)
 
     def run_proc(self):
-        self.libraries.config(text='  ☐  Checking required Libraries', fg=self.yellow, font=self.font12 + ' bold', anchor='w')
-        self.window.update()
+        debug = False
+        try:
+            config_dict = rci.read_ini_file(self.config_ini_val)
+            debug = bool(str(config_dict['options'].get('debug', '')).strip().lower() in ('1', 'true', 'yes', 'y', 't'))
+        except:
+            pass
+        if debug:
+            tee = Tee('logfile.log')
+            original_stdout = sys.stdout
+            sys.stdout = tee
         run(silent_mode=True, gui=self)
+        if debug:
+            sys.stdout = original_stdout
+            tee.close()
 
     def restart(self):
         self.window.destroy()
@@ -343,15 +343,13 @@ def loading_gui():
     loading_window.title("CropSuite")
     loading_window.resizable(0, 0) #type:ignore
     loading_window.overrideredirect(1) #type:ignore
-    
+
     x, y = 500, 500
     loading_window.geometry(f'{x}x{y}+{(loading_window.winfo_screenwidth() - x) // 2}+{(loading_window.winfo_screenheight() - y) // 2}')
-
     splash_image = Image.open(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'splashscreen.png')))
     splash_image = splash_image.resize((500, 500))
     splash_image = ImageTk.PhotoImage(splash_image)
     Label(loading_window, image=splash_image).pack() #type:ignore
-
     os.makedirs(os.path.abspath(os.path.join(os.path.dirname(__file__), 'plant_params')), exist_ok=True)
     os.makedirs(os.path.abspath(os.path.join(os.path.dirname(__file__), 'results')), exist_ok=True)
     os.makedirs(os.path.abspath(os.path.join(os.path.dirname(__file__), 'temp')), exist_ok=True)
@@ -526,16 +524,6 @@ def read_data_file(data_file, layer, comp_file='', extent=[0, 0, 0, 0]):
 
             comp_data = comp_data.astype(float)
             return data, comp_data, x_min, x_max, y_min, y_max, nodata
-
-def resize_array_interp(array, new_shape, limit=(-9999, -9999), dtype=np.float16):
-    h, w = array.shape
-    interp_func = interp2d(np.arange(w), np.arange(h), array, kind='linear')
-    ret = interp_func(np.linspace(0, w - 1, int(new_shape[1])), np.linspace(0, h - 1, int(new_shape[0])))
-    if limit[0] != -9999:
-        ret[ret<=-limit[0]] = 0
-    if limit[1] != -9999:
-        ret[ret>=limit[1]] = 0
-    return ret.astype(dtype)
 
 def resize_array(array):
     non_nan_indices = np.where(~np.isnan(array))
@@ -932,7 +920,7 @@ def plot_data(data, filename, x_min, x_max, y_min, y_max, projection=ccrs.PlateC
                 'optimal_sowing_date_with_vernalization', 'start_growing_cycle_after_vernalization'] and not classified):
         im = ax.imshow(data, extent=(x_min, x_max, y_min, y_max), origin='upper', cmap=cmap, transform=ccrs.PlateCarree(), vmin=min_val, vmax=max_val, interpolation='nearest') #type:ignore
         if (abs(x_min) + abs(x_max) >= 300) or (abs(y_min) + abs(y_max) >= 120):
-            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree())
+            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree()) #type:ignore
         else:
             ax.set_extent((x_min, x_max, y_min, y_max), crs=ccrs.PlateCarree()) #type:ignore
         try:
@@ -958,7 +946,7 @@ def plot_data(data, filename, x_min, x_max, y_min, y_max, projection=ccrs.PlateC
         mesh = ax.pcolormesh(np.linspace(x_min, x_max, data.shape[1]), np.linspace(y_min, y_max, data.shape[0]),
                                 np.rot90(np.transpose(data)), cmap=cmap, transform=ccrs.PlateCarree(), norm=norm)
         if (abs(x_min) + abs(x_max) >= 300) or (abs(y_min) + abs(y_max) >= 120):
-            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree())
+            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree()) #type:ignore
         else:
             ax.set_extent((x_min, x_max, y_min, y_max), crs=ccrs.PlateCarree()) #type:ignore
         try:
@@ -987,7 +975,7 @@ def plot_data(data, filename, x_min, x_max, y_min, y_max, projection=ccrs.PlateC
     save_file = os.path.join(os.path.dirname(filename), f'{fn}_class.png' if classified else f'{fn}.png')
     legend_file = os.path.join(os.path.dirname(filename), f'{fn}_legend.png')
     fig.savefig(save_file, bbox_inches='tight', pad_inches=.4, dpi=600)
-    fig_legend.savefig(legend_file, bbox_inches='tight', dpi=600, transparent=True)
+    fig_legend.savefig(legend_file, bbox_inches='tight', dpi=600, transparent=True) #type:ignore
     fig_legend.clear()
     ax_legend.clear()
     del fig_legend, ax_legend
@@ -1099,7 +1087,7 @@ def plot_diff_data(data, filename, x_min, x_max, y_min, y_max, compare_file, pro
             min_val = -180
             max_val = 180
             label = 'Shift in Day of Year (DOY)'  
-            data[(data > 183) | (data < -183)] = np.nan
+            data[(data > 183) | (data < -183)] = np.nan #type:ignore
 
     
     plt.ioff()
@@ -1116,7 +1104,7 @@ def plot_diff_data(data, filename, x_min, x_max, y_min, y_max, compare_file, pro
                                         'start_growing_cycle_after_vernalization'] and not classified:
         im = ax.imshow(data, extent=(x_min, x_max, y_min, y_max), origin='upper', cmap=cmap, transform=ccrs.PlateCarree(), vmin=min_val, vmax=max_val, interpolation='nearest')
         if (abs(x_min) + abs(x_max) >= 300) or (abs(y_min) + abs(y_max) >= 120):
-            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree())
+            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree()) #type:ignore
         else:
             ax.set_extent((x_min, x_max, y_min, y_max), crs=ccrs.PlateCarree()) #type:ignore
         try:
@@ -1142,7 +1130,7 @@ def plot_diff_data(data, filename, x_min, x_max, y_min, y_max, compare_file, pro
         mesh = ax.pcolormesh(np.linspace(x_min, x_max, data.shape[1]), np.linspace(y_min, y_max, data.shape[0]),
                                 np.rot90(np.transpose(data)), cmap=cmap, transform=ccrs.PlateCarree(), norm=norm)
         if (abs(x_min) + abs(x_max) >= 300) or (abs(y_min) + abs(y_max) >= 120):
-            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree())
+            ax.set_extent((-180, 180, -90, 90), crs=ccrs.PlateCarree()) #type:ignore
         else:
             ax.set_extent((x_min, x_max, y_min, y_max), crs=ccrs.PlateCarree()) #type:ignore
         try:
@@ -1172,7 +1160,7 @@ def plot_diff_data(data, filename, x_min, x_max, y_min, y_max, compare_file, pro
     save_file = os.path.join(os.path.dirname(filename), f'{fn}_class.png' if classified else f'{fn}.png')
     legend_file = os.path.join(os.path.dirname(filename), f'{fn}_legend.png')
     fig.savefig(save_file, bbox_inches='tight', pad_inches=.4, dpi=600)
-    fig_legend.savefig(legend_file, bbox_inches='tight', dpi=600, transparent=True)
+    fig_legend.savefig(legend_file, bbox_inches='tight', dpi=600, transparent=True) #type:ignore
     fig_legend.clear()
     ax_legend.clear()
     del fig_legend, ax_legend
@@ -1362,6 +1350,7 @@ def viewer_gui(config):
                         'optimal_sowing_date_with_vernalization': 'sowing_date', 'start_growing_cycle_after_vernalization': 'sowing_date'}
 
     colormap_list = {'suitability': ['white', 'darkgray', 'darkred', 'yellow', 'greenyellow', 'limegreen', 'darkgreen', 'darkslategray'],
+                     'suitability_2': ['#f5f5f5', '#a9a9a9', '#fde725', '#a0da39', '#4ac16d', '#1fa187', '#277f8e', '#365c8d', '#46327e', '#440154'],
                      'suitability_colorblind': ['#f5f5f5', '#a6611a', '#dfc27d', '#80cdc1', '#018571'],
                      'multiple_cropping': ['white', '#eceeba', '#a7c55c', '#0b3d00'],
                      'suitable_sowing_days': ['palegoldenrod', 'forestgreen', 'darkgreen', 'teal'],
@@ -1482,7 +1471,7 @@ def viewer_gui(config):
             empty_cv()
         cmap_sel_var.set(file_colors_dict.get(os.path.splitext(sel_crop_val.get())[0].lower() + ('' if compare_val.get() == 0 else '_diff'), 'viridis'))
 
-    limfabut = Button(main_frame, text='Limitation Analyzer', command=lambda: limfa.limfact_analyzer(config_ini=config_path, current_path=os.path.join(results, get_item_path(treeview_select.selection()[0], treeview_select))), state='disabled')
+    limfabut = Button(main_frame, text='Limitation Analyzer', command=lambda: limfa.limfact_analyzer(current_path=os.path.join(results, get_item_path(treeview_select.selection()[0], treeview_select))), state='disabled')
     limfabut.pack(side='top', fill='x', expand=True, padx=5, pady=5)
 
 
@@ -1528,7 +1517,7 @@ def viewer_gui(config):
         fact = int(np.max([(data.shape[0] / 2000), (data.shape[1] / 2000)]))
         if fact > 1:
             data = dt.resample_array_with_nans_custom(data, fact)
-        projection = proj_list.get(proj_sel_var.get(), ccrs.PlateCarree)()
+        projection = proj_list.get(proj_sel_var.get(), ccrs.PlateCarree)() #type:ignore
         savefig, legend = plot_data(data, filename, x_min, x_max, y_min, y_max, projection=projection, classified=classified, colormap=colormap)
         fig = merge_plot_legend(savefig, legend)
         show_image_centered(canvas, frm_canvas, fig)
@@ -1555,7 +1544,7 @@ def viewer_gui(config):
 
         diff = data - comp_data
 
-        projection = proj_list.get(proj_sel_var.get(), ccrs.PlateCarree)()
+        projection = proj_list.get(proj_sel_var.get(), ccrs.PlateCarree)() #type:ignore
         savefig, legend = plot_diff_data(diff, filename, x_min, x_max, y_min, y_max, compare_file, projection=projection, classified=classified, colormap=colormap)
         fig = merge_plot_legend(savefig, legend)
         show_image_centered(canvas, frm_canvas, fig)
@@ -1573,12 +1562,26 @@ def viewer_gui(config):
     viewer_gui.mainloop()
     viewer_gui.wait_window(viewer_gui)
 
+def open_viewer_beta(config):
+    curr_dct = rci.read_ini_file(config)
+    results_path = os.path.dirname(curr_dct['files'].get('output_dir', os.getcwd()))
+    view = viewer.ViewerGUI(results_path)
+    view.mainloop()
+
 def main_gui():
     global plant_param_dir
     plant_param_dir = ''
     main_window = Tk()
-    main_window.after(201, lambda :main_window.iconbitmap(os.path.join(os.path.dirname(__file__), 'src', 'cropsuiteicon.ico')))
-    x, y = 600, 720
+    try:
+        if sys.platform.startswith("win"):
+            icon_path = os.path.join(os.path.dirname(__file__), 'src', 'cropsuiteicon.ico')
+            main_window.iconbitmap(icon_path)
+        else:
+            icon_path = os.path.join(os.path.dirname(__file__), 'src', 'cropsuiteicon.png')
+            main_window.iconphoto(True, PhotoImage(file=icon_path))
+    except:
+        pass
+    x, y = 600, 600
     main_window.geometry(f'{x}x{y}+{(main_window.winfo_screenwidth() - x) // 2}+{(main_window.winfo_screenheight() - y) // 2}')
     main_window.title('CropSuite')
     main_window.resizable(0, 0) #type:ignore
@@ -1758,13 +1761,15 @@ def main_gui():
             if checked:
                 check_cfg.config(text='  ☑  Config File is valid', fg=green)
                 viewer_button.config(state='normal')
-                preproc_button.config(state='normal')
+                viewer_beta_button.config(state='normal')
+                #preproc_button.config(state='normal')
                 edit_cfg.config(state='normal')
                 main_window.update()
             else:
                 check_cfg.config(text='  ✗  Config file is faulty', fg=red)
                 viewer_button.config(state='disabled')
-                preproc_button.config(state='disabled')
+                viewer_beta_button.config(state='disabled')
+                #preproc_button.config(state='disabled')
                 edit_cfg.config(state='disabled')
                 main_window.update()
 
@@ -1773,8 +1778,8 @@ def main_gui():
 
     rt = Tk()
     rt.withdraw()
-    preproc_button = Button(frm, text='Preprocessing', compound='left', command=lambda: ppgui.preproc_gui(tk.Toplevel(rt), config_ini_var.get()))
-    preproc_button.pack(side='left', padx=5, pady=5)
+    #preproc_button = Button(frm, text='Preprocessing', compound='left', command=lambda: ppgui.preproc_gui(tk.Toplevel(rt), config_ini_var.get()))
+    #preproc_button.pack(side='left', padx=5, pady=5)
 
     manual_button = Button(frm, text=' Open Manual', command=open_manual, compound='left')
     manual_button.pack(side='right', padx=5, pady=5)
@@ -1782,10 +1787,13 @@ def main_gui():
     viewer_button = Button(frm, text=' Open Data Viewer', compound='left', command=lambda: open_viewer(config_ini_var.get()))
     viewer_button.pack(side='right', padx=5, pady=5)
 
+    viewer_beta_button = Button(frm, text='Open Data Viewer (Beta)', compound='left', command=lambda: open_viewer_beta(config_ini_var.get()))
+    viewer_beta_button.pack(side='right', padx=5, pady=5)
+
     Label(main_window, text='', font=font10 + ' bold').pack()
     
     global current_cfg
-    current_cfg = r'.\config.ini'
+    current_cfg = 'config.ini'
     config_ini_var = StringVar(main_window, current_cfg)
 
     Label(main_window, text='1 - Config File').pack(pady=5, padx=5, anchor='w')
@@ -1813,9 +1821,11 @@ def main_gui():
         if 'plant_param_dir' in config_dict['files']:
             plant_param_dir = config_dict['files'].get('plant_param_dir') #type:ignore
         else:
-            plant_param_dir = 'plant_params'
+            plant_param_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plant_params')
     except:
-        plant_param_dir = ''
+        plant_param_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plant_params')    
+    os.makedirs(os.path.join(plant_param_dir, 'available'), exist_ok=True)
+
     check_cfg = Label(main_window, text='  ☐  Checking Config File', fg=yellow, font=font12 + ' bold', anchor='w')
     check_cfg.pack()
     if os.path.exists(config_ini_var.get()):
@@ -1825,12 +1835,14 @@ def main_gui():
     if checked:
         check_cfg.config(text='  ☑  Config File is valid', fg=green)
         viewer_button.config(state='normal')
-        preproc_button.config(state='normal')
+        viewer_beta_button.config(state='normal')
+        #preproc_button.config(state='normal')
         main_window.update()
     else:
         check_cfg.config(text='  ✗  Config file is faulty', fg=red)
         viewer_button.config(state='disabled')
-        preproc_button.config(state='disabled')
+        viewer_beta_button.config(state='disabled')
+        #preproc_button.config(state='disabled')
         main_window.update()
     main_window.update()
 
@@ -1840,18 +1852,20 @@ def main_gui():
         if 'plant_param_dir' in config_dict['files']:
             plant_param_dir = config_dict['files'].get('plant_param_dir') #type:ignore
         else:
-            plant_param_dir = 'plant_params'
+            plant_param_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plant_params')
         main_window.update()
 
     if checked:
-        edit_cfg = Button(main_window, text=' Config.ini Options', compound='left', command=config_gui_button)
+        edit_cfg = Button(main_window, text='Options', compound='left', command=config_gui_button)
         viewer_button.config(state='normal')
-        preproc_button.config(state='normal')
+        viewer_beta_button.config(state='normal')
+        #preproc_button.config(state='normal')
         main_window.update()
     else:
-        edit_cfg = Button(main_window, text=' Config.ini Options', compound='left', command=config_gui_button, state='disabled')
+        edit_cfg = Button(main_window, text='Options', compound='left', command=config_gui_button, state='disabled')
         viewer_button.config(state='disabled')
-        preproc_button.config(state='disabled')
+        viewer_beta_button.config(state='disabled')
+        #preproc_button.config(state='disabled')
         main_window.update()
     edit_cfg.pack(pady=5)
 
@@ -1873,17 +1887,19 @@ def main_gui():
             if 'plant_param_dir' in config_dict['files']:
                 plant_param_dir = config_dict['files'].get('plant_param_dir') #type:ignore
             else:
-                plant_param_dir = 'plant_params'
+                plant_param_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plant_params')
             if checked:
                 check_cfg.config(text='  ☑  Config File is valid', fg=green)
                 edit_cfg.config(state='normal')
                 viewer_button.config(state='normal')
-                preproc_button.config(state='normal')
+                viewer_beta_button.config(state='normal')
+                #preproc_button.config(state='normal')
             else:
                 check_cfg.config(text='  ✗  Config file is faulty', fg=red)
                 edit_cfg.config(state='disabled')
                 viewer_button.config(state='disabled')
-                preproc_button.config(state='disabled')
+                viewer_beta_button.config(state='disabled')
+                #preproc_button.config(state='disabled')
             main_window.update()
 
     def open_plant_gui():
@@ -1908,472 +1924,27 @@ def main_gui():
     sel_but.pack(side='left', padx=10)
     Label(main_window, text='').pack()
 
-    Frame(main_window, bd=5, relief='sunken', height=2).pack(side='top', fill='x')
-    Label(main_window, text='', font=font10 + ' bold').pack()
-    Label(main_window, text='3 - Parameter Dataset Selection').pack(pady=5, padx=5, anchor='w')
-    set_but = Button(main_window, text=' Select Parameter Datasets', compound='left', command=lambda: param_gui(config_ini_var.get()))
-    set_but.pack()
-    Label(main_window, text='', font=font10 + ' bold').pack()
+    #Frame(main_window, bd=5, relief='sunken', height=2).pack(side='top', fill='x')
+    #Label(main_window, text='', font=font10 + ' bold').pack()
+
+    #Label(main_window, text='3 - Parameter Dataset Selection').pack(pady=5, padx=5, anchor='w')
+    #set_but = Button(main_window, text=' Select Parameter Datasets', compound='left', command=lambda: param_gui(config_ini_var.get()))
+    #set_but.pack()
+    #Label(main_window, text='', font=font10 + ' bold').pack()
 
     def start(ini_path):
         main_window.destroy()
         start_secproc(ini_path)
 
-    Frame(main_window, bd=5, relief='sunken', height=2).pack(side='top', fill='x')
+    #Frame(main_window, bd=5, relief='sunken', height=2).pack(side='top', fill='x')
     bottom_frame = Frame(main_window).pack(fill=X)
     Button(bottom_frame, text='START', command=lambda: start(get_config()), font=font16 + ' bold').pack(side='left', fill=X, expand=True)
     Button(bottom_frame, text='EXIT', command=exit_all, font=font16 + ' bold').pack(side='left', fill=X, expand=True)
     main_window.mainloop()
 
 def config_gui(config_file):
-    config_window = Tk()
-    config_window.focus_force()
-    x, y = 600, 800
-    config_window.geometry(f'{x}x{y}+{(config_window.winfo_screenwidth() - x) // 2}+{(config_window.winfo_screenheight() - y) // 2}')
-    config_window.title('CropSuite - Options')
-    config_window.resizable(0, 1) #type:ignore
-
-    font10 = f'Helvetica 10'
-    font12 = f'Helvetica 12'
-    font14 = f'Helvetica 14'
-
-    Label(config_window, text='Config.ini Options\n', font=font12 + ' bold').pack()
-    global config_dict
-    config_dict = rci.read_ini_file(config_file)
-    tabs = [val for val in list(config_dict.keys()) if not val.startswith('parameters.')]
-
-    tab_parent = ttk.Notebook(config_window)
-    tab_list = []
-    for idx, tab in enumerate(tabs):
-        tab_list.append(Frame(tab_parent))
-        tab_parent.add(tab_list[idx], text=str(tab).capitalize())
-    tab_parent.pack(expand=1, fill='both')
-
-    # Tab Files
-    Label(tab_list[0], text='Adjust Paths here',).pack(anchor='w', pady=5, padx=5)
-    label_vals = []
-
-    def check_dir(dir):
-        if os.path.exists(dir):
-            return True
-        else:
-            return False
-
-    def select_path(main_key, sub_key):
-        path = filedialog.askdirectory(initialdir=os.getcwd())
-        if path:
-            config_dict[main_key][sub_key] = path
-            label_vals[list(config_dict[main_key].keys()).index(sub_key)].config(text=path)
-            outline = 'green' if check_dir(path) else 'red'
-            label_vals[list(config_dict[main_key].keys()).index(sub_key)].config(highlightthickness=2, highlightbackground=outline)
-            config_window.update()
-
-    def select_filepath(main_key, sub_key):
-        path = filedialog.askopenfilename(initialdir=os.getcwd())
-        if path:
-            config_dict[main_key][sub_key] = path
-            label_vals[list(config_dict[main_key].keys()).index(sub_key)].config(text=path)
-            outline = 'green' if check_dir(path) else 'red'
-            label_vals[list(config_dict[main_key].keys()).index(sub_key)].config(highlightthickness=2, highlightbackground=outline)
-            config_window.update()
-
-    files_lst = ['fine_dem', 'land_sea_mask', 'texture_classes']
-    for key in config_dict.get(tabs[0]).keys(): #type:ignore
-        frame = Frame(tab_list[0], border=4)
-        frame.pack(fill=X)
-        label_key = Label(frame, text=str(key))
-        label_value = Label(frame, text=str(config_dict.get(tabs[0]).get(key)), borderwidth=2, relief='groove') #type:ignore
-        outline = 'green' if check_dir(str(config_dict.get(tabs[0]).get(key))) else 'red' #type:ignore
-        label_value.config(highlightthickness=2, highlightbackground=outline)
-        label_vals.append(label_value)
-        
-        if str(key) in files_lst:
-            button_select = Button(frame, text='Change', command=lambda k=key: select_filepath(tabs[0], k))
-        else:
-            button_select = Button(frame, text='Change', command=lambda k=key: select_path(tabs[0], k))
-
-        label_key.pack(side='left')
-        button_select.pack(side='right')
-        label_value.pack(side='right')
-    
-
-    # Tab Options
-    Label(tab_list[1], text='Adjust Options here').pack(anchor='w', pady=5, padx=5)
-    try:
-        dest_resolution_x, _ = dt.get_geotiff_resolution(config_dict.get(tabs[0]).get('fine_dem')) #type:ignore
-    except:
-        dest_resolution_x = 0
-
-    resolution = np.round(dest_resolution_x * 3600, 0)
-    unit = 'arcsec'
-    if resolution > 60:
-        resolution = np.round(dest_resolution_x * 60, 0)
-        unit = 'arcmin'
-
-    resolution_var = DoubleVar(tab_list[1], resolution)
-    frame_resolution = Frame(tab_list[1])
-    frame_resolution.pack(fill='x')
-    resolution_label = Label(frame_resolution, text='Spatial output resolution: ')
-    resolution_entry = Entry(frame_resolution, textvariable=resolution_var, state='disabled')
-    resolutionunit_label = Label(frame_resolution, text=f' {unit}')
-    resolution_label.pack(side='left')
-    resolutionunit_label.pack(side='right')
-    resolution_entry.pack(side='right')
-    
-
-    # Scheduler Checkbox
-    scheduler_var = IntVar(tab_list[1], 1 if config_dict[tabs[1]]['use_scheduler'] else 0)
-    use_scheduler_checkbox = Checkbutton(tab_list[1], text='Use Scheduler', variable=scheduler_var)
-    use_scheduler_checkbox.pack(anchor='w')
-
-    # Irrigation checkbox
-    irrigation_var = IntVar(tab_list[1], 1 if config_dict[tabs[1]]['irrigation'] == '1' else 0)
-    irrigation_checkbox = Checkbutton(tab_list[1], text='Irrigation', variable=irrigation_var)
-    irrigation_checkbox.pack(anchor='w')
-    
-
-    def update_downscaling_options(*args):
-        if str(temp_method_var.get()).strip() == 'Height Regression':
-            winsize_entry.config(state='normal')
-            usetempgrad_checkbox.config(state='normal')
-        else:
-            winsize_entry.config(state='disabled')
-            usetempgrad_checkbox.config(state='disabled')
-
-    frame_temp_method = Frame(tab_list[1], border=4)
-    frame_temp_method.pack(fill=X)
-    temp_methods = ('Nearest Neighbour', 'Bilinear Interpolation', 'Based on WorldClim Data', 'Height Regression')
-    temp_method_var = StringVar(frame_temp_method, temp_methods[int(config_dict[tabs[1]]['temperature_downscaling_method'])])
-    temp_method_label = Label(frame_temp_method, text="Temperature Downscaling Method")
-    temp_method_dropdown = ttk.Combobox(frame_temp_method, textvariable=temp_method_var, width=40)
-    temp_method_dropdown['values'] = temp_methods
-    temp_method_label.pack(side='left')
-    temp_method_dropdown.pack(side='right')
-    temp_method_dropdown.bind("<<ComboboxSelected>>", update_downscaling_options)
-
-    frame_prec_method = Frame(tab_list[1], border=4)
-    frame_prec_method.pack(fill=X)
-    prec_methods = ('Nearest Neighbour', 'Bilinear Interpolation', 'Based on WorldClim Data')
-    prec_method_var = StringVar(frame_prec_method, prec_methods[int(config_dict[tabs[1]]['precipitation_downscaling_method'])])
-    prec_method_label = Label(frame_prec_method, text="Precipitation Downscaling Method")
-    prec_method_dropdown = ttk.Combobox(frame_prec_method, textvariable=prec_method_var, width=40)
-    prec_method_dropdown['values'] = prec_methods
-    prec_method_label.pack(side='left')
-    prec_method_dropdown.pack(side='right')
-
-    frame_output_type = Frame(tab_list[1], border=4)
-    frame_output_type.pack(fill=X)
-    output_types = ('GeoTIFF', 'NetCDF4', 'Cloud Optimized GeoTIFF')
-
-    output_var = StringVar(frame_output_type, output_types[[out_dt.lower() for out_dt in output_types].index(config_dict[tabs[1]]['output_format'])])
-    output_label = Label(frame_output_type, text='Output data format')
-    output_dropdown = ttk.Combobox(frame_output_type, textvariable=output_var, width=40)
-    output_dropdown['values'] = output_types
-    output_label.pack(side='left')
-    output_dropdown.pack(side='right')
-
-    # Downscaling Window Size
-    frame_winsize = Frame(tab_list[1])
-    frame_winsize.pack(fill=X, padx=5, pady=5)
-    winsize_var = IntVar(frame_winsize, int(config_dict[tabs[1]]['downscaling_window_size']))
-    winsize_label = Label(frame_winsize, text='Downscaling Window Size')
-    winsize_entry = Entry(frame_winsize, textvariable=winsize_var)
-    winsize_entry_back = Label(frame_winsize, text=' Px     ')
-    winsize_label.pack(side='left')
-    winsize_entry_back.pack(side='right')
-    winsize_entry.pack(side='right')
-
-    # Use TempGrad
-    usetempgrad_var = IntVar(tab_list[1], 1 if config_dict[tabs[1]]['downscaling_use_temperature_gradient'] else 0)
-    usetempgrad_checkbox = Checkbutton(tab_list[1], text='Use Temperature Gradient', variable=usetempgrad_var)
-    usetempgrad_checkbox.pack(anchor='w')
-
-    # Temp Bias Threshold 
-    frame_tbias = Frame(tab_list[1])
-    frame_tbias.pack(fill=X, padx=5, pady=5)
-    tbias_var = DoubleVar(frame_tbias, float(config_dict[tabs[1]]['downscaling_temperature_bias_threshold']))
-    tbias_label = Label(frame_tbias, text='Temperature BIAS Threshold')
-    tbias_entry = Entry(frame_tbias, textvariable=tbias_var)
-    tbias_label_back = Label(frame_tbias, text=' K      ')
-    tbias_label.pack(side='left')
-    tbias_label_back.pack(side='right')
-    tbias_entry.pack(side='right')
-
-    # Prec Bias Threshold 
-    frame_pbias = Frame(tab_list[1])
-    frame_pbias.pack(fill=X, padx=5, pady=5)
-    pbias_var = DoubleVar(frame_pbias, float(config_dict[tabs[1]]['downscaling_precipitation_bias_threshold']))
-    pbias_label = Label(frame_pbias, text='Precipitation BIAS Threshold')
-    pbias_entry = Entry(frame_pbias, textvariable=pbias_var)
-    pbias_label_back = Label(frame_pbias, text=' mm  ')
-    pbias_label.pack(side='left')
-    pbias_label_back.pack(side='right')
-    pbias_entry.pack(side='right')
-
-    # Daily Prec Threshold 
-    frame_pthre = Frame(tab_list[1])
-    frame_pthre.pack(fill=X, padx=5, pady=5)
-    pthre_var = DoubleVar(frame_pthre, float(config_dict[tabs[1]]['downscaling_precipitation_per_day_threshold']))
-    pthre_label = Label(frame_pthre, text='Drizzle Threshold per Day')
-    pthre_entry = Entry(frame_pthre, textvariable=pthre_var)
-    pthre_label_back = Label(frame_pthre, text=' mm  ')
-    pthre_label.pack(side='left')
-    pthre_label_back.pack(side='right')
-    pthre_entry.pack(side='right')
-
-    # Turnaround Time
-    turn_frame = Frame(tab_list[1])
-    turn_frame.pack(fill='x', padx=5, pady=5)
-    turnaround_lab = Label(turn_frame, text='Processing time between harvest and sowing for multiple cropping')
-    turnaround_var = IntVar(turn_frame, config_dict[tabs[1]]['multiple_cropping_turnaround_time'] if 'multiple_cropping_turnaround_time' in config_dict[tabs[1]] else 21)
-    turnaround_entry = Entry(turn_frame, textvariable=turnaround_var)
-    turnaround_label_back = Label(turn_frame, text=' days ')
-    turnaround_lab.pack(side='left')
-    turnaround_label_back.pack(side='right')
-    turnaround_entry.pack(side='right')
-
-    output_soil = IntVar(tab_list[1], 1 if config_dict[tabs[1]]['output_soil_data'] else 0)
-    output_soil_cb = Checkbutton(tab_list[1], text='Output weighted soil datasets', variable=output_soil)
-    output_soil_cb.pack(anchor='w')
-    
-    # Remove Int Results
-    remres_var = IntVar(tab_list[1], 1 if config_dict[tabs[1]]['remove_interim_results'] else 0)
-    remres_checkbox = Checkbutton(tab_list[1], text='Remove interim results', variable=remres_var)
-    remres_checkbox.pack(anchor='w')
-
-    # Remove Downscaled Climate
-    remdsclim_var = IntVar(tab_list[1], 1 if config_dict[tabs[1]].get('remove_downscaled_climate', 0) else 0)
-    remdsclim_checkbox = Checkbutton(tab_list[1], text='Remove downscaled climate', variable=remdsclim_var)
-    remdsclim_checkbox.pack(anchor='w')
-
-    rest_label = Label(tab_list[1], text='')
-    rest_label.pack(anchor='w', fill='both', expand=True)
-
-    # Tab Extent
-    Label(tab_list[2], text='Adjust Extent here').pack(anchor='w', pady=5, padx=5)
-    Label(tab_list[2], text='').pack()
-    
-    top_coord_var = DoubleVar(tab_list[2], float(config_dict[tabs[2]]['upper_left_y']))
-    top_coord_entry = Spinbox(tab_list[2], textvariable=top_coord_var, from_=-90, to=90, justify='center', width=10, increment=0.1)
-    top_coord_entry.pack(side='top', padx=5, pady=5)
-
-    frame_ext = Frame(tab_list[2])
-    frame_ext.pack(fill='x')
-
-    left_coord_var = DoubleVar(tab_list[2], float(config_dict[tabs[2]]['upper_left_x']))
-    left_coord_entry = Spinbox(frame_ext, textvariable=left_coord_var, from_=-90, to=90, justify='center', width=10, increment=0.1)
-
-    canvas = Canvas(frame_ext, relief='ridge')
-
-    fig = plt.figure(figsize=(5, 5), dpi=100)  # 2.5x2.5 inches with 100 DPI to match the 250x250 pixel canvas
-    global ax
-    ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-
-    global canvas_agg
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    canvas_agg = FigureCanvasTkAgg(fig, master=canvas)
-    canvas_agg.get_tk_widget().pack(side='left')
-
-    def update_map():
-        x_min, x_max = float(config_dict[tabs[2]]['upper_left_x']), float(config_dict[tabs[2]]['lower_right_x'])
-        y_min, y_max = float(config_dict[tabs[2]]['upper_left_y']), float(config_dict[tabs[2]]['lower_right_y'])
-        map_x_min, map_x_max = np.clip(x_min-2.5, -180, x_max), np.clip(x_max+2.5, x_min, 180)
-        map_y_min, map_y_max = np.clip(np.min([y_min, y_max])-2.5, -90, 90), np.clip(np.max([y_min, y_max])+2.5, -90, 90)
-        ax.clear()
-        ax.set_extent([map_x_min, map_x_max, map_y_min, map_y_max]) #type:ignore
-        try:
-            ax.add_feature(cfeature.COASTLINE)#type:ignore
-            ax.add_feature(cfeature.BORDERS)#type:ignore
-        except:
-            pass
-        rect = Rectangle((x_min, y_min), x_max-x_min, y_max-y_min, linewidth=2, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-        canvas_agg.draw()
-    update_map()
-
-    right_coord_var = DoubleVar(tab_list[2], float(config_dict[tabs[2]]['lower_right_x']))
-    right_coord_entry = Spinbox(frame_ext, textvariable=right_coord_var, from_=-180, to=180, justify='center', width=10, increment=0.1)
-    
-    left_coord_entry.pack(side='left', padx=5)
-    right_coord_entry.pack(side='right', padx=5)
-    canvas.pack(side='left')
-
-    bot_coord_var = DoubleVar(tab_list[2], float(config_dict[tabs[2]]['lower_right_y']))
-    bot_coord_entry = Spinbox(tab_list[2], textvariable=bot_coord_var, from_=-180, to=180, justify='center', width=10, increment=0.1)
-    bot_coord_entry.pack(side='top', pady=10)
-
-    def on_entry_change(*args):
-        brk = False
-        try:
-            x_min = float(left_coord_var.get())    
-            left_coord_entry.config(highlightthickness=2, highlightbackground='green')   
-        except:
-            left_coord_entry.config(highlightthickness=2, highlightbackground='red')
-            brk = True
-        try:
-            x_max = float(right_coord_var.get()) 
-            right_coord_entry.config(highlightthickness=2, highlightbackground='green')          
-        except:
-            right_coord_entry.config(highlightthickness=2, highlightbackground='red')
-            brk = True
-        try:
-            y_min = float(bot_coord_entry.get())     
-            bot_coord_entry.config(highlightthickness=2, highlightbackground='green')      
-        except:
-            bot_coord_entry.config(highlightthickness=2, highlightbackground='red')
-            brk = True
-        try:
-            y_max = float(top_coord_entry.get())       
-            top_coord_entry.config(highlightthickness=2, highlightbackground='green')    
-        except:
-            top_coord_entry.config(highlightthickness=2, highlightbackground='red')
-            brk = True
-        
-        if not brk:
-            if float(x_min) > float(x_max):
-                brk = True
-                left_coord_entry.config(highlightthickness=2, highlightbackground='red')
-                right_coord_entry.config(highlightthickness=2, highlightbackground='red')
-            else:
-                left_coord_entry.config(highlightthickness=2, highlightbackground='green')
-                right_coord_entry.config(highlightthickness=2, highlightbackground='green')
-
-        if not brk:
-            if float(y_min) > float(y_max):
-                brk = True
-                bot_coord_entry.config(highlightthickness=2, highlightbackground='red')
-                top_coord_entry.config(highlightthickness=2, highlightbackground='red')
-            else:
-                bot_coord_entry.config(highlightthickness=2, highlightbackground='green')
-                top_coord_entry.config(highlightthickness=2, highlightbackground='green')
-
-        if not brk:
-            config_dict[tabs[2]]['upper_left_x'], config_dict[tabs[2]]['lower_right_x'] = float(x_min), float(x_max)
-            config_dict[tabs[2]]['upper_left_y'], config_dict[tabs[2]]['lower_right_y'] = float(y_min), float(y_max)
-            update_map()
-
-
-    top_coord_var.trace('w', on_entry_change)
-    bot_coord_var.trace('w', on_entry_change)
-    left_coord_var.trace('w', on_entry_change)
-    right_coord_var.trace('w', on_entry_change)
-
-    # Tab Climate Variability
-    Label(tab_list[3], text='Adjust Climate Variability Options here').pack(anchor='w', pady=5, padx=5)
-    Label(tab_list[3], text='').pack()
-
-    consvar_var = IntVar(tab_list[3], 1 if config_dict[tabs[3]]['consider_variability'] else 0)
-    consvar_checkbox = Checkbutton(tab_list[3], text='Consider Climate Variability', variable=consvar_var)
-    consvar_checkbox.pack(anchor='w')
-
-    # Tab Membership Functions
-    Label(tab_list[4], text='Adjust Membership Function Options here').pack(anchor='w', pady=5, padx=5)
-    Label(tab_list[4], text='').pack()
-
-    plotcrop_var = IntVar(tab_list[4], 1 if config_dict[tabs[4]]['plot_for_each_crop'] else 0)
-    plotcrop_checkbox = Checkbutton(tab_list[4], text='Plot Membership Functions for each Crop', variable=plotcrop_var)
-    plotcrop_checkbox.pack(anchor='w')
-
-
-    def save(config_dict):
-        config_window.update()
-        config_dict['options']['use_scheduler'] = scheduler_var.get()
-        config_dict['options']['irrigation'] = '1' if irrigation_var.get() else '0'
-        config_dict['options']['temperature_downscaling_method'] = str(temp_methods.index(temp_method_var.get()))
-        config_dict['options']['precipitation_downscaling_method'] = str(prec_methods.index(prec_method_var.get()))
-        config_dict['options']['output_format'] = 'cog' if str(output_var.get()).lower() == 'cloud optimized geotiff' else str(output_var.get()).lower()
-        config_dict['options']['downscaling_window_size'] = winsize_entry.get()
-        config_dict['options']['downscaling_use_temperature_gradient'] = usetempgrad_var.get()
-        config_dict['options']['downscaling_temperature_bias_threshold'] = tbias_entry.get()
-        config_dict['options']['downscaling_precipitation_bias_threshold'] = pbias_entry.get()
-        config_dict['options']['downscaling_precipitation_per_day_threshold'] = pthre_entry.get()
-        config_dict['options']['remove_interim_results'] = remres_var.get()
-        config_dict['options']['remove_downscaled_climate'] = remdsclim_var.get()
-        config_dict['options']['output_soil_data'] = output_soil.get()
-        config_dict['options']['multiple_cropping_turnaround_time'] = turnaround_entry.get()
-
-        config_dict['extent']['upper_left_x'] = str(np.clip(float(left_coord_entry.get()), -180, 180))
-        config_dict['extent']['upper_left_y'] = str(np.clip(float(top_coord_entry.get()), -90, 90))
-        config_dict['extent']['lower_right_x'] = str(np.clip(float(right_coord_entry.get()), -180, 180))
-        config_dict['extent']['lower_right_y'] = str(np.clip(float(bot_coord_entry.get()), -90, 90))
-
-        config_dict['climatevariability']['consider_variability'] = consvar_var.get()
-
-        config_dict['membershipfunctions']['plot_for_each_crop'] = plotcrop_var.get()
-
-        ini = rci.write_config(config_dict, config_file)
-        config_window.destroy()
-
-    def cancel_confirm():
-        confirm_win = Tk()
-        x, y = 200, 80
-        confirm_win.geometry(f'{x}x{y}+{(confirm_win.winfo_screenwidth() - x) // 2}+{(confirm_win.winfo_screenheight() - y) // 2}')
-        confirm_win.title('Confirm')
-        confirm_win.resizable(0, 0) #type:ignore
-        Label(confirm_win, text='Cancel without saving\nConfirm?').pack()
-        frame_ex = Frame(confirm_win)
-        frame_ex.pack(fill='x')
-        def conf():
-            config_window.destroy()
-            confirm_win.destroy()
-        conf_but = Button(frame_ex, text='Confirm', command=conf, font=font10, width=15)
-        canc_but = Button(frame_ex, text='Cancel', command=lambda: confirm_win.destroy(), font=font10, width=15)
-        conf_but.pack(side='left')
-        canc_but.pack(side='right')
-
-    bottom_frame = Frame(config_window)
-    bottom_frame.pack(fill=X)
-    button_save = Button(bottom_frame, text='Save', command=lambda: save(config_dict), font=font14 + ' bold')
-    button_exit = Button(bottom_frame, text='Cancel', command=cancel_confirm, font=font14 + ' bold')
-    button_save.pack(side='left', fill=X, expand=True)
-    button_exit.pack(side='left', fill=X, expand=True)
-    update_downscaling_options()
+    config_window = cfg.ConfigGUI(os.path.abspath(config_file))
     config_window.mainloop()
-
-def get_key_by_value(dict, value):
-    return list(dict.keys())[list(dict.values()).index(value)]
-
-def get_all_keys(dict):
-    return list(dict.keys())
-
-def get_all_membershipfunction_names():
-    all_pairs = []
-    directory = os.path.join('plant_params', 'available')
-    if not os.path.exists(os.path.join(directory, 'available')):
-        print(f'No subdirectory "available" in {directory} found!')
-        return []
-    for filename in os.listdir(directory):
-        if filename.endswith('.inf'):  # Assuming the files have a .txt extension
-            with open(os.path.join(directory, filename), 'r') as file:
-                try:
-                    file_content = file.read()
-                    pairs = []
-                    lines = file_content.split('\n')
-                    for line in lines:
-                        if '_vals' in line:
-                            key = line.split('=')[0].strip()
-                            suit_key = key.replace('_vals', '_suit')
-                            if any(suit_key in l for l in lines):
-                                if key[:-5] not in all_pairs:
-                                    all_pairs.append(key[:-5])
-                except:
-                    pass
-    return all_pairs
-
-def check_param_dict(param_dict):
-    required_keys = {
-        'data_directory': '.',
-        'weighting_method': '0',
-        'weighting_factors': [2, 1.5, 1, 0.75, 0.5, 0.25],
-        'conversion_factor': 1.0,
-        'no_data': None,
-        'interpolation_method': 0,
-        'rel_member_func': 'Not specified'
-    }
-    for key, default_value in required_keys.items():
-        if key not in param_dict:
-            param_dict[key] = default_value
-    return param_dict
 
 def exit_frame(gui, confirm=False):
     if not confirm:
@@ -2462,292 +2033,6 @@ def new_crop_name():
 
 def param_gui(config_file):
     pargui.ParamGUI(config_file=config_file)
-
-def param_gui_bak(config_file):
-    param_window = Tk()
-    x, y = 450, 580
-    param_window.geometry(f'{x}x{y}+{(param_window.winfo_screenwidth() - x) // 2}+{(param_window.winfo_screenheight() - y) // 2}')
-    param_window.title('CropSuite - Parameter Datasets')
-    param_window.resizable(0, 1) #type:ignore
-    param_window.focus_force()
-    
-    font12 = f'Helvetica 12'
-
-    Label(param_window, text='Parameter Datasets\n', font=font12 + ' bold').pack(anchor='w')
-    global config_dict
-    config_dict = rci.read_ini_file(config_file)
-    vals = [val.split('.')[1] for val in list(config_dict.keys()) if val.startswith('parameters.')]
-
-    param_dict = config_dict.get(f'parameters.{vals[0]}')
-    param_dict = check_param_dict(param_dict)
-
-    ttk.Separator(param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
-    
-    dropdown_param = StringVar(param_window) 
-    dropdown_param.set(str(vals[0]))
-    drop = ttk.Combobox(param_window, textvariable=dropdown_param, values=vals, state="readonly")
-    #drop = OptionMenu(param_window, dropdown_param, *vals) 
-    drop.pack(anchor='w', padx=5, pady=5, fill='x')
-
-    def select_param_dir():
-        print('Select Parameter Directory')
-        param_dir = filedialog.askdirectory(initialdir=os.getcwd(), title='Select Parameter Directory')
-        try:
-            tifs = sum(1 for file in os.listdir(param_dir) if file.endswith('.tif'))
-            if 0 <= tifs < 3:
-                weight_method.set(get_key_by_value(weight_dict, 0))
-            if 3 <= tifs < 6:
-                weight_method.set(get_key_by_value(weight_dict, 1))
-            if tifs >= 6:
-                weight_method.set(get_key_by_value(weight_dict, 2))
-            update_weighting()
-        except:
-            pass
-        dir_entry_val.set(param_dir)
-        param_window.update()
-
-    ttk.Separator(param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
-
-    dir_frame = Frame(param_window)
-    dir_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-    dir_label = Label(dir_frame, text='Path: ')
-    dir_entry_val = StringVar(dir_frame, param_dict.get('data_directory')) #type:ignore
-    dir_entry = Entry(dir_frame, textvariable=dir_entry_val, width=50, state='disabled') 
-    dir_sel_but = Button(dir_frame, text='Select Directory', command=select_param_dir)
-    dir_label.pack(side='left')
-    dir_sel_but.pack(side='right')
-    dir_entry.pack(side='right', padx=5)
-
-    ttk.Separator(param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
-
-    weight_dict = {'First Layer only': 0, 'Topsoil/First Three Layers': 1, 'Full soil/Six Layers': 2}
-
-    weight_frame = Frame(param_window)
-    weight_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-    weight_label = Label(weight_frame, text='Weighting Method: ')
-    weight_method = StringVar(weight_frame, get_key_by_value(weight_dict, int(param_dict.get('weighting_method')))) #type:ignore
-    weight_dropdown = ttk.Combobox(weight_frame, textvariable=weight_method, width=40)
-    weight_dropdown['values'] = get_all_keys(weight_dict)
-    
-    ttk.Separator(param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
-
-    weight_label.pack(side='left')
-    weight_dropdown.pack(side='right')
-
-    factors_value1 = DoubleVar(param_window, float(param_dict.get('weighting_factors').split(',')[0])) #type:ignore
-    factors_value2 = DoubleVar(param_window, float(param_dict.get('weighting_factors').split(',')[1])) #type:ignore
-    factors_value3 = DoubleVar(param_window, float(param_dict.get('weighting_factors').split(',')[2])) #type:ignore
-    factors_value4 = DoubleVar(param_window, float(param_dict.get('weighting_factors').split(',')[3])) #type:ignore
-    factors_value5 = DoubleVar(param_window, float(param_dict.get('weighting_factors').split(',')[4])) #type:ignore
-    factors_value6 = DoubleVar(param_window, float(param_dict.get('weighting_factors').split(',')[5])) #type:ignore
-
-    frame1 = Frame(param_window)
-    frame2 = Frame(param_window)
-    frame3 = Frame(param_window)
-    frame4 = Frame(param_window)
-    frame5 = Frame(param_window)
-    frame6 = Frame(param_window)
-
-    factors_label1 = Label(frame1, text='Weighting Factor   0 -  25 cm: ')
-    factors_entry1 = Entry(frame1, textvariable=factors_value1)
-    factors_label2 = Label(frame2, text='Weighting Factor  25 -  50 cm: ')
-    factors_entry2 = Entry(frame2, textvariable=factors_value2)
-    factors_label3 = Label(frame3, text='Weighting Factor  50 -  75 cm: ')
-    factors_entry3 = Entry(frame3, textvariable=factors_value3)
-    factors_label4 = Label(frame4, text='Weighting Factor  75 - 100 cm: ')
-    factors_entry4 = Entry(frame4, textvariable=factors_value4)
-    factors_label5 = Label(frame5, text='Weighting Factor 100 - 125 cm: ')
-    factors_entry5 = Entry(frame5, textvariable=factors_value5)
-    factors_label6 = Label(frame6, text='Weighting Factor 125 - 200 cm: ')
-    factors_entry6 = Entry(frame6, textvariable=factors_value6)
-
-    factors_label1.pack(side='left')
-    factors_entry1.pack(side='right')
-    factors_label2.pack(side='left')
-    factors_entry2.pack(side='right')
-    factors_label3.pack(side='left')
-    factors_entry3.pack(side='right')
-    factors_label4.pack(side='left')
-    factors_entry4.pack(side='right')
-    factors_label5.pack(side='left')
-    factors_entry5.pack(side='right')
-    factors_label6.pack(side='left')
-    factors_entry6.pack(side='right')
-
-    frame1.pack(anchor='w', padx=5, pady=5, fill='x')
-    frame2.pack(anchor='w', padx=5, pady=5, fill='x')
-    frame3.pack(anchor='w', padx=5, pady=5, fill='x')
-    frame4.pack(anchor='w', padx=5, pady=5, fill='x')
-    frame5.pack(anchor='w', padx=5, pady=5, fill='x')
-    frame6.pack(anchor='w', padx=5, pady=5, fill='x')
-
-    ttk.Separator(param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
-
-    frame_convvfact = Frame(param_window)
-    frame_convvfact.pack(anchor='w', padx=5, pady=5, fill='x')
-    convfact_val = DoubleVar(param_window, float(param_dict.get('conversion_factor'))) #type:ignore
-    conv_fact_label = Label(frame_convvfact, text='Conversion Factor: ')
-    conv_fact_entry = Entry(frame_convvfact, textvariable=convfact_val, width=40)
-    conv_fact_label.pack(side='left')
-    conv_fact_entry.pack(side='right')
-
-    nodata_frame = Frame(param_window)
-    nodata_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-    nodata_val = DoubleVar(param_window, param_dict.get('no_data')) #type:ignore
-    nodata_lab = Label(nodata_frame, text='No Data Value: ')
-    nodata_entry = Entry(nodata_frame, textvariable=nodata_val, width=40)
-    nodata_lab.pack(side='left')
-    nodata_entry.pack(side='right')
-
-    interp_dict = {'Linear': 0, 'Cubic': 1, 'Quadratic': 2, 'Spline': 3, 'Polygonal': 4, 'First Order Spline/sLinear': 5}
-
-    interp_frame = Frame(param_window)
-    interp_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-    interp_label = Label(interp_frame, text='Interpolation Method of Membership Function: ')
-    interp_method = StringVar(interp_frame, get_key_by_value(interp_dict, int(param_dict.get('interpolation_method')))) #type:ignore
-    interp_dropdown = ttk.Combobox(interp_frame, textvariable=interp_method, width=40)
-    interp_dropdown['values'] = get_all_keys(interp_dict)
-    
-    interp_label.pack(side='left')
-    interp_dropdown.pack(side='right')   
-
-    avail_functions = sorted(get_all_membershipfunction_names())
-    func_frame = Frame(param_window)
-    func_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-    func_label = Label(func_frame, text='Corresponding Membership Function: ')
-    func_val = StringVar(func_frame, str(param_dict.get('rel_member_func'))) #type:ignore
-    func_dropdown = ttk.Combobox(func_frame, textvariable=func_val, width=40)
-    func_dropdown['values'] = avail_functions
-    
-    func_label.pack(side='left')
-    func_dropdown.pack(side='right')
-
-    def update_param(*args):
-        save()
-        param = dropdown_param.get()
-        param_dict = config_dict.get(f'parameters.{param}')
-        param_dict = check_param_dict(param_dict)
-        dir_entry_val.set(param_dict.get('data_directory')) #type:ignore
-        weight_method.set(get_key_by_value(weight_dict, int(param_dict.get('weighting_method')))) #type:ignore
-        convfact_val.set(float(param_dict.get('conversion_factor'))) #type:ignore
-        interp_method.set(get_key_by_value(interp_dict, int(param_dict.get('interpolation_method')))) #type:ignore
-        func_val.set(str(param_dict.get('rel_member_func'))) #type:ignore
-        nodata_val.set(param_dict.get('no_data')) #type:ignore
-        update_weighting()
-        param_window.update()
-
-    def update_weighting(*args):
-        if int(weight_dict.get(weight_method.get())) == 0: #type:ignore
-            factors_value1.set(1)
-            factors_value2.set(0)
-            factors_value3.set(0)
-            factors_value4.set(0)
-            factors_value5.set(0)
-            factors_value6.set(0)
-            factors_entry1.config(state='disabled')
-            factors_entry2.config(state='disabled')
-            factors_entry3.config(state='disabled')
-            factors_entry4.config(state='disabled')
-            factors_entry5.config(state='disabled')
-            factors_entry6.config(state='disabled')
-        elif int(weight_dict.get(weight_method.get())) == 1: #type:ignore
-            factors_value1.set(1)
-            factors_value2.set(1)
-            factors_value3.set(1)
-            factors_value4.set(0)
-            factors_value5.set(0)
-            factors_value6.set(0)
-            factors_entry1.config(state='normal')
-            factors_entry2.config(state='normal')
-            factors_entry3.config(state='normal')
-            factors_entry4.config(state='disabled')
-            factors_entry5.config(state='disabled')
-            factors_entry6.config(state='disabled')
-        else:
-            factors_value1.set(float(param_dict.get('weighting_factors').split(',')[0])) #type:ignore
-            factors_value2.set(float(param_dict.get('weighting_factors').split(',')[1])) #type:ignore
-            factors_value3.set(float(param_dict.get('weighting_factors').split(',')[2])) #type:ignore
-            factors_value4.set(float(param_dict.get('weighting_factors').split(',')[3])) #type:ignore
-            factors_value5.set(float(param_dict.get('weighting_factors').split(',')[4])) #type:ignore
-            factors_value6.set(float(param_dict.get('weighting_factors').split(',')[5])) #type:ignore
-            factors_entry1.config(state='normal')
-            factors_entry2.config(state='normal')
-            factors_entry3.config(state='normal')
-            factors_entry4.config(state='normal')
-            factors_entry5.config(state='normal')
-            factors_entry6.config(state='normal')
-        param_window.update()
-
-    def save():
-        param = dropdown_param.get()
-        config_dict[f'parameters.{param}']['data_directory'] = dir_entry_val.get()
-        config_dict[f'parameters.{param}']['weighting_method'] = weight_dict[weight_method.get()]
-        config_dict[f'parameters.{param}']['weighting_factors'] = f'{factors_value1.get()},{factors_value2.get()},{factors_value3.get()},{factors_value4.get()},{factors_value5.get()},{factors_value6.get()}'
-        config_dict[f'parameters.{param}']['conversion_factor'] = convfact_val.get()
-        try:
-            config_dict[f'parameters.{param}']['no_data'] = nodata_val.get()
-        except:
-            config_dict[f'parameters.{param}'].pop('no_data', None)
-        config_dict[f'parameters.{param}']['interpolation_method'] = interp_dict[interp_method.get()]
-        config_dict[f'parameters.{param}']['rel_member_func'] = func_val.get()
-        rci.write_config(config_dict, config_file)
-        #param_window.destroy()
-        #param_gui(config_file)
-
-
-    def add_param():
-        new_name = add_name('Add Parameter Name')
-        config_dict[f'parameters.{new_name}'] = {
-            'data_directory': '.',
-            'weighting_method': '0',
-            'weighting_factors': '2,1.5,1,0.75,0.5,0.25',
-            'conversion_factor': 1.0,
-            'interpolation_method': 0,
-            'rel_member_func': 'Not specified'
-        }
-        save()
-
-    def rem_param():
-        def rem():
-            for key in get_all_keys(config_dict[f'parameters.{str(val.get())}']):
-                config_dict[f'parameters.{str(val.get())}'].pop(key, None)
-            config_dict.pop(f'parameters.{str(val.get())}', None) #type:ignore
-            remparam_win.destroy()
-            rci.write_config(config_dict, config_file)            
-
-        remparam_win = Tk()
-        remparam_win.title('Remove Parameter')
-        remparam_win.resizable(0, 0) #type:ignore
-        frm = Frame(remparam_win)
-        frm.pack(anchor='w', padx=5, pady=5, fill='x')
-        val = StringVar(remparam_win, sorted(vals)[0])
-        lab = Label(frm, text='Remove Parameter: ')
-        box = ttk.Combobox(frm, textvariable=val, width=40)
-        box['values'] = sorted(vals)
-        lab.pack(side='left')
-        box.pack(side='right')
-        Button(remparam_win, text='Ok', command=rem).pack(pady=5,fill='x')
-        save()
-
-
-    weight_dropdown.bind('<<ComboboxSelected>>', update_weighting)
-    dropdown_param.trace("w", update_param)
-
-    ttk.Separator(param_window, orient='horizontal').pack(padx=5, pady=5, fill='x')
-
-    but_frame = Frame(param_window)
-    but_frame.pack(anchor='w', padx=5, pady=5, fill='x')
-    save_but = Button(but_frame, text='Save', command=save)
-    add_but = Button(but_frame, text='Add', command=add_param)
-    rem_but = Button(but_frame, text='Remove', command=rem_param)
-    exit_but = Button(but_frame, text='Exit', command=lambda: exit_frame(param_window, confirm=False))
-    save_but.pack(side='left')
-    add_but.pack(side='left', padx=5)
-    rem_but.pack(side='left', padx=5)
-    exit_but.pack(side='right')
-    
-    #update_param()
-    param_window.mainloop()
 
 def get_available_crop_list():
     try:
@@ -2865,7 +2150,6 @@ def crop_install_gui(config_ini):
 
     new_but = Button(but_frame, text='Add New', command=new)
     new_but.pack(side='left', padx=5)
-
     exit_but = Button(but_frame, text='Exit', command=exit)
     exit_but.pack(side='right', padx=5)
 
@@ -2873,25 +2157,28 @@ def crop_install_gui(config_ini):
 
 def plant_gui(config_ini):
     plant_window = Tk()
-    x, y = 540, 650
+    x, y = 540, 650 if os.name == 'nt' else 750
     plant_window.geometry(f'{x}x{y}+{(plant_window.winfo_screenwidth() - x) // 2}+{(plant_window.winfo_screenheight() - y) // 2}')
     plant_window.title('CropSuite - Crop Selection')
     plant_window.resizable(0, 1) #type:ignore
     plant_window.focus_force()
+    config_ini_dict = rci.read_ini_file(config_ini)
+    plant_param_dir = config_ini_dict['files'].get('plant_param_dir', 'plant_params')
 
     font12 = f'Helvetica 12'
     font14 = f'Helvetica 14'
 
     Label(plant_window, text='Select the desired crops (Multiple selection possible)', font=font14 + ' bold').pack()
 
+    os.makedirs(os.path.join(plant_param_dir, 'available'), exist_ok=True)
+
     def list_available():
-        return sorted([crop.capitalize() for crop in os.listdir(os.path.join('plant_params', 'available')) if crop.endswith('.inf') and not crop.startswith('._')])
+        return sorted([crop.capitalize() for crop in os.listdir(os.path.join(plant_param_dir, 'available')) if crop.endswith('.inf') and not crop.startswith('._')])
 
     def list_checked():
-        # Return a list of indices for items that should be selected
         checked_indices = []
-        for i, item in enumerate(sorted([crop for crop in os.listdir(os.path.join('plant_params', 'available')) if crop.endswith('.inf')])):
-            if item in sorted([crop for crop in os.listdir(os.path.join('plant_params')) if crop.endswith('.inf')]):
+        for i, item in enumerate(sorted([crop for crop in os.listdir(os.path.join(plant_param_dir, 'available')) if crop.endswith('.inf')])):
+            if item in sorted([crop for crop in os.listdir(os.path.join(plant_param_dir)) if crop.endswith('.inf')]):
                 checked_indices.append(i)
         return checked_indices
 
@@ -2903,47 +2190,33 @@ def plant_gui(config_ini):
         listbox.selection_clear(0, END)
 
     def open_file(item):
-        file_path = os.path.join('plant_params', 'available', item)
+        file_path = os.path.join(plant_param_dir, 'available', str(item).lower())
         if platform.system() == "Windows": os.startfile(file_path) #type:ignore
         elif platform.system() == "Darwin": os.system("open " + file_path)
         else: os.system("xdg-open " + file_path)
 
     def edit(item):
-        plant_param_gui.open_gui(config_ini_path=config_ini, plant_inf=item)
-        #rt = Tk()
-        #rt.withdraw()
-        #plant_window = plant_param_gui.plant_param_gui(tk.Toplevel(rt), config_ini, item)
-        #plant_window.root.wait_window(plant_window.root)
+        plant_param_gui.open_gui(config_ini_path=config_ini, plant_inf=str(item).lower())
         plant_window.update()
 
     def new():
-        crop_install_gui(config_ini)
+        #crop_install_gui(config_ini)
+        plant_param_gui.open_gui(config_ini_path=config_ini, plant_inf=None)
         update_listbox(listbox, sorted(list_available()))
         plant_window.update()
 
     global item
     item = ''
 
-    def on_right_click(event):
-        global item
-        item = listbox.get(listbox.nearest(event.y))
-        try:
-            listbox.selection_clear(0, END)
-            listbox.selection_set(listbox.nearest(event.y))
-            listbox.activate(listbox.nearest(event.y))
-        except Exception as e:
-            print(e)
-        context_menu.post(event.x_root, event.y_root)
-
     def ok():
-        for fn in [crop for crop in os.listdir('plant_params') if crop.endswith('.inf')]:
+        for fn in [crop for crop in os.listdir(plant_param_dir) if crop.endswith('.inf')]:
             try:
-                os.remove(os.path.join('plant_params', fn))
+                os.remove(os.path.join(plant_param_dir, fn))
             except:
                 pass
         indices = listbox.curselection()
         selected_files = [listbox.get(index) for index in indices]
-        [shutil.copy(os.path.join('plant_params', 'available', file_name), os.path.join('plant_params', file_name)) for file_name in selected_files]
+        [shutil.copy(os.path.join(plant_param_dir, 'available', file_name.lower()), os.path.join(plant_param_dir, file_name.lower())) for file_name in selected_files]
         dest()
 
     def dest():
@@ -2969,22 +2242,29 @@ def plant_gui(config_ini):
 
     update_listbox(listbox, list_available())
 
-    #image_edit = PhotoImage(file=os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'edit.png')), master=plant_window)
-    #image_open = PhotoImage(file=os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'notepad.png')), master=plant_window)
-    #image_cancel = PhotoImage(file=os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'cancel.png')), master=plant_window)
-
     context_menu = Menu(plant_window, tearoff=0)
     context_menu.add_command(label="Open Config File", compound='left', command=lambda: open_file(item))
     context_menu.add_command(label="Edit", compound='left', command=lambda: edit(item))
     context_menu.add_command(label="Cancel", compound='left', command=context_menu.unpost)
 
-    if sys.platform == 'linux' or sys.platform == 'linux2' or sys.platform == 'win32' or sys.platform == 'win64':
-        listbox.bind("<Button-3>", on_right_click)
-    else:
-        listbox.bind("<Button-2>", on_right_click)
-    
-    #listbox.bind("<Double-Button-1>", open_file)
-    # Create buttons for select all and deselect all
+    def on_right_click(event):
+        global item
+        item = listbox.get(listbox.nearest(event.y))
+        try:
+            listbox.selection_clear(0, END)
+            listbox.selection_set(listbox.nearest(event.y))
+            listbox.activate(listbox.nearest(event.y))
+        except Exception as e:
+            print(e)
+        context_menu.post(event.x_root, event.y_root)
+
+    #if sys.platform == 'linux' or sys.platform == 'linux2' or sys.platform == 'win32' or sys.platform == 'win64':
+    #    listbox.bind("<Button-3>", on_right_click)
+    #else:
+    listbox.bind("<Button-3>", on_right_click)
+    listbox.bind("<Button-2>", on_right_click)
+    listbox.bind("<Control-Button-1>", on_right_click)
+
     select_all_button = Button(plant_window, text="Select All", command=select_all)
     select_all_button.pack(side="left", padx=5)
     deselect_all_button = Button(plant_window, text="Deselect All", command=deselect_all)
@@ -2998,7 +2278,7 @@ def plant_gui(config_ini):
     ex_button.pack(side="left", padx=5)
     #plant_window.wait_window()
     plant_window.mainloop()
-
+"""
 def get_empty_crop_dict():
     def_plant = os.listdir(os.path.join('plant_params', 'available'))
     def_plant = [plant for plant in def_plant if plant.endswith('.inf')][1]
@@ -3023,6 +2303,7 @@ def get_empty_crop_dict():
         def_plant['name'] = name
     new_file = os.path.join('plant_params', 'available', f'{def_plant["name"]}.inf')
     return def_plant, new_file
+
 
 def convert_to_number(value):
     if value.lower() == 'y': return True
@@ -3171,6 +2452,7 @@ class add_conditions_window:
     def cancel(self):
         self.data_saved = False  # Indicate data was not saved
         self.root.destroy()
+"""
 
 def exit_all():
     sys.exit()
@@ -3179,8 +2461,7 @@ def start_secproc(ini_path):
     CropSuiteGui(ini_path)
 
 if __name__ == '__main__':
-
-    loading_gui()
-    # main_gui()
-
-    # gui = CropSuiteGui()
+    print('Running CropSuite')
+    print('Loading...')
+    if cv.check_versions():
+        loading_gui()
