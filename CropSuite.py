@@ -91,8 +91,8 @@ def run(silent_mode=False, config_file=None, gui = None):
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                    Version 1.3.1                    |
-        |                      2025-04-17                     |
+        |                    Version 1.3.2                    |
+        |                      2025-04-18                     |
         |                                                     |
         |                                                     |
         |                   Matthias Knüttel                  |
@@ -199,7 +199,7 @@ def run(silent_mode=False, config_file=None, gui = None):
 
     lst = [i * int(final_shape[0] / no_tiles) for i in range(no_tiles)] + [final_shape[0]]
     extents = [[extent[2] + lst[i+1] * resolution, extent[1], extent[2] + lst[i] * resolution, extent[3]]for i in range(no_tiles)]
-    extents = [[round(val, 4) for val in sublist] for sublist in extents]
+    # extents = [[round(val, 4) for val in sublist] for sublist in extents]
 
     for idx, extent in enumerate(extents):
         if gui != None:
@@ -221,7 +221,8 @@ def run(silent_mode=False, config_file=None, gui = None):
         if gui != None:
             gui.set_climsuit(completed=False, started=True)
             gui.update()
-        print('\n'+f'Processing extent {extent} - {idx+1} out of {len(extents)}'+'\n')
+        formatted_extent = [f"{float(e):.4f}" for e in extent]
+        print(f"\nProcessing extent {formatted_extent} - {idx + 1} out of {len(extents)}\n")
 
         if climate_config['membershipfunctions']['plot_for_each_crop']:
             rpp.plot_all_parameterizations(plant_params_formulas, plant_params)
@@ -236,7 +237,7 @@ def run(silent_mode=False, config_file=None, gui = None):
         else:
             print(' -> Loading required climate data to memory...')
             temperature = nc.read_area_from_netcdf_list(temp_files, overlap=False, extent=extent, dayslices=temp_dailyfiles)
-            precipitation = nc.read_area_from_netcdf_list(prec_files, overlap=False, extent=extent, dayslices=prec_dailyfiles)      
+            precipitation = nc.read_area_from_netcdf_list(prec_files, overlap=False, extent=extent, dayslices=prec_dailyfiles)
             fine_resolution = (temperature.shape[0], temperature.shape[1]) #type:ignore
             land_sea_mask, _ = dt.load_specified_lines(climate_config['files']['land_sea_mask'], extent, False)
             if land_sea_mask.shape != fine_resolution:

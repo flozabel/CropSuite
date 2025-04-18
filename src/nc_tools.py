@@ -2,13 +2,15 @@ import numpy as np
 import os
 import xarray as xr
 import shutil
-from dask.distributed import Client
+from dask.distributed import Client, as_completed
 from dask.diagnostics import ProgressBar #type:ignore
+import dask.array as da
 from datetime import datetime
 import rasterio
 from dask.distributed import Client
 import netCDF4 as nc4
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 def read_area_from_netcdf(filename, extent, variable='data', day_range=[-1, -1]):
     # extent = y_max, x_min, y_min, x_max
@@ -276,6 +278,18 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
         print()
 
 
+
+def load_data(fn, extent, var_name):
+    try:
+        with xr.open_dataset(fn) as ds:
+            ds_data = ds.sel(lat=slice(extent['top'], extent['bottom']),
+                             lon=slice(extent['left'], extent['right']))[var_name]  # type:ignore
+            return np.asarray(ds_data)
+    except Exception as e:
+        print(f"Error processing {fn}: {e}")
+        return None
+    
+
 def read_area_from_netcdf_list(downscaled_files, overlap = False, var_name = 'data', extent = [0, 0, 0, 0], timestep=-1, dayslices=False, transp=True):
     """
         downscaled_files: list of netcdf files
@@ -285,12 +299,13 @@ def read_area_from_netcdf_list(downscaled_files, overlap = False, var_name = 'da
 
     if dayslices:
         downscaled_files = [f for f in downscaled_files if os.path.exists(f)]
+        ds_list = []
+        total = len(downscaled_files)
         try:
             extent = {'top': extent[0], 'left': extent[1], 'bottom': extent[2], 'right': extent[3]}
         except:
             pass
-        ds_list = []
-        total = len(downscaled_files)
+
         for idx, fn in enumerate(downscaled_files):
             try:
                 ds = xr.open_dataset(fn)
@@ -303,6 +318,7 @@ def read_area_from_netcdf_list(downscaled_files, overlap = False, var_name = 'da
                 print_progress_bar(idx, total-1, prefix='       Progress', suffix='Complete', length=50)
             except:
                 pass
+
         if transp:
             return np.transpose(np.asarray(ds_list), (1, 2, 0))
         else:

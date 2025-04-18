@@ -699,7 +699,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             else:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc) as executor:
                     executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))
-            
+                    
             collect()        
             break
         try:

@@ -559,6 +559,8 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
 
 def preprocessing_main(config_ini, temp_files, prec_files, time_range, extent, proc_varfiles, varname_temp='tas', varname_pr='pr', downscaling=False):
     # Read Config.ini
+    if not os.path.exists(config_ini):
+        return
     config = rci.read_ini_file(config_ini)
     # Get Plant Parameterization Directory
     plant_param_dir = config['files'].get('plant_param_dir', 'plant_params')

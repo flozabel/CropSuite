@@ -13,9 +13,14 @@ except:
     from src import temp_interpolation as ti
     from src import prec_interpolation as pi
 from scipy.stats import linregress
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 import math
 from skimage import transform as skt
+#from multiprocessing import Pool
+from scipy.ndimage import zoom
+#from scipy.interpolate import RegularGridInterpolator
+#from skimage.transform import resize
+#from numba import njit
 
 temp = os.path.join(os.getcwd(), 'temp')
 os.makedirs(temp, exist_ok=True)
@@ -464,22 +469,22 @@ def precipitation_interpolation_nearestneighbour(config_file, extent, output_dir
             print(future.result())    
     return [os.path.join(output_dir, f'ds_prec_{day}.nc') for day in range(0, 365)]
 
+
+### RRPCF INTERPOLATION ###
+
+
 def process_rrpcf_day(day, data, fine_resolution, landsea_mask, output_dir, crop, water, extent, method='linear'):
     if not data.shape == fine_resolution:
         order = 0 if method == 'nearest' else 1 if method == 'linear' else 3 if method == 'cubic' else 1
-        dayslice = skt.resize(data, fine_resolution, order=order, mode='edge', anti_aliasing=False)
-        dayslice[np.isnan(landsea_mask)] = -32767
-        nc.write_to_netcdf(dayslice.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=9, nodata_value=-32767) #type:ignore
-    else:
-        data[np.isnan(landsea_mask)] = -32767
-        nc.write_to_netcdf(data.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=9, nodata_value=-32767) #type:ignore
+        data = zoom(data, (fine_resolution[0] / data.shape[0], fine_resolution[1] / data.shape[1]), order=order)
+    data[np.isnan(landsea_mask)] = -1
+    nc.write_to_netcdf(data, os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=7, nodata_value=-1) #type:ignore
+    
 
 def interpolate_rrpcf(config_file, extent, area_name, crops):
     output_dir = os.path.join(config_file['files']['output_dir']+'_downscaled', area_name)
     os.makedirs(output_dir, exist_ok=True)
     climate_data_dir = os.path.join(config_file['files']['climate_data_dir'])
-    #fine_dem, _ = dt.load_specified_lines(config_file['files']['fine_dem'], extent, False)
-    #fine_resolution = fine_dem.shape
     fine_resolution = dt.get_resolution_array(config_file, extent, True)
     landsea_mask, _ = dt.load_specified_lines(config_file['files']['land_sea_mask'], extent, False)
     landsea_mask = np.asarray(landsea_mask).astype(np.float16)
@@ -490,12 +495,12 @@ def interpolate_rrpcf(config_file, extent, area_name, crops):
 
     for crop in crops:
         crop = os.path.splitext(crop)[0].lower()
-        water = 'ir' if bool(int(config_file['options'].get('irrigation', False))) else 'rf'
-        if not os.path.exists(os.path.join(climate_data_dir, f'rrpcf_{crop}_{water}.tif')):
-            rrpcf_file = os.path.join(climate_data_dir, f'rrpcf_{crop}_{water}.nc')
+        water = 'ir' if config_file['options'].get('irrigation', '0') == '1' else 'rf'
+        for ext in ['.tif', '.nc']:
+            rrpcf_file = os.path.join(climate_data_dir, f'rrpcf_{crop}_{water}{ext}')
+            if os.path.exists(rrpcf_file):
+                break
         else:
-            rrpcf_file = os.path.join(climate_data_dir, f'rrpcf_{crop}_{water}.tif')
-        if not os.path.exists(rrpcf_file):
             continue
 
         print(f' -> Downscaling RRPCF data for {crop} under {water} conditions')
@@ -514,41 +519,52 @@ def interpolate_rrpcf(config_file, extent, area_name, crops):
             data = np.asarray(data, dtype=np.int16)
             data = data.transpose(1, 2, 0)
         
+        data = np.nan_to_num(data, nan=-1)
+        data = data.astype(np.int8)
+
         count = len(data.shape)
         if count == 2:
             if os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc')):
                 continue
             if not data.shape == fine_resolution:
                 order = 0 if method == 'nearest' else 1 if method == 'linear' else 3 if method == 'cubic' else 1
-                dayslice = skt.resize(data, fine_resolution, order=order, mode='edge', anti_aliasing=False)
-                dayslice[np.isnan(landsea_mask)] = -32767
-                nc.write_to_netcdf(dayslice.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=9, nodata_value=-32767) #type:ignore
+                dayslice = zoom(data, (fine_resolution[0] / data.shape[0], fine_resolution[1] / data.shape[1]), order=order)
+                dayslice[np.isnan(landsea_mask)] = -1
+                nc.write_to_netcdf(dayslice.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=9, nodata_value=-1) #type:ignore
             else:
-                data[np.isnan(landsea_mask)] = -32767
-                nc.write_to_netcdf(data.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=9, nodata_value=-32767) #type:ignore
+                data[np.isnan(landsea_mask)] = -1
+                nc.write_to_netcdf(data.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=9, nodata_value=-1) #type:ignore
         else:
             if data.shape[:2] == fine_resolution:
-                data[np.isnan(landsea_mask)] = -32767
+                data[np.isnan(landsea_mask)] = -1
                 for day in range(data.shape[-1]):
                     if os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc')):
                         continue
-                    nc.write_to_netcdf(data[..., day].astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=9, nodata_value=-32767) #type:ignore
+                    nc.write_to_netcdf(data[..., day].astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=9, nodata_value=-1) #type:ignore
             else:
                 area = float((extent[0] - extent[2]) * (extent[3] - extent[1]))
                 resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
                 resfact = resolution_factor.get(int(config_file['options'].get('resolution', 5)), 1)
-                worker = np.clip(int((dt.get_cpu_ram()[1] / area) * 700 * resfact * resfact), 1, dt.get_cpu_ram()[0]-1)
+                sysfact = {'win32': 1, 'darwin': 8, 'linux': 0.6}.get(sys.platform, 1)
+                cpu, ram = dt.get_cpu_ram()
+                worker = int(np.clip(int((ram * 10000) / (area / resfact) * sysfact), 1, cpu-1))
                 print(f'Using {worker} workers')
 
-                """
-                    ### DEBUG ###
-                for day in range(365):
-                    process_rrpcf_day(day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method)
-                """
+                if worker == 1:
+                    for day in range(365):
+                        if not os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc')):
+                            process_rrpcf_day(day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method)
+                else:
+                    try:
+                        with ProcessPoolExecutor(max_workers=worker) as executor:
+                            tasks = [executor.submit(process_rrpcf_day, day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method) for day in range(365) if not os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'))]
+                            for future in tasks:
+                                future.result()
 
-                with ThreadPoolExecutor(max_workers=worker) as executor:
-                    tasks = [executor.submit(process_rrpcf_day, day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method) for day in range(365) if not os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'))]
-                    for future in tasks:
-                        future.result()
+                    except Exception as e:
+                        print(f"Error processing RRPCF data: {e}")
+                        for day in range(365):
+                            if not os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc')):
+                                process_rrpcf_day(day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method)
                 
     return output_dir, True
