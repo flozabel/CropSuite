@@ -201,6 +201,9 @@ def get_plant_param_interp_forms_dict(plant_params, config):
                     parameter_name = parameter_dictionary[param_name.replace('_vals', '')]
                     method = int(config[f'parameters.{parameter_name}']['interpolation_method'])
                 try:
+                    if x_vals != sorted(x_vals):
+                        x_vals = x_vals[::-1]
+                        y_vals = y_vals[::-1]
                     formula, min_val, max_val = get_formula(x_vals, y_vals, method)
                 except Exception as e:
                     print(f'Parameterization error in {crop_name}:')

@@ -2,15 +2,14 @@ import numpy as np
 import os
 import xarray as xr
 import shutil
-from dask.distributed import Client, as_completed
+from dask.distributed import Client
 from dask.diagnostics import ProgressBar #type:ignore
-import dask.array as da
 from datetime import datetime
 import rasterio
 from dask.distributed import Client
 import netCDF4 as nc4
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import math
 
 def read_area_from_netcdf(filename, extent, variable='data', day_range=[-1, -1]):
     # extent = y_max, x_min, y_min, x_max
@@ -103,15 +102,19 @@ def get_netcdf_extent(file_path):
 def check_extent_load_file(filepath, extent):
     # extent: [top, left, bottom, right]
     extent_dict = {k: float(extent[k]) for k in ('top', 'left', 'bottom', 'right')} if isinstance(extent, dict) else dict(zip(('top', 'left', 'bottom', 'right'), map(float, extent)))
-    #try:
-    #    extent_dict = {'top': float(extent[0]), 'left': float(extent[1]), 'bottom': extent[2], 'right': extent[3]}
-    #except:
-    #    extent_dict = {'top': extent.get('top', float(list(extent)[0])), 'left': float(list(extent)[1]), 'bottom': float(list(extent)[2]), 'right': float(list(extent)[3])}
+
+    extent_dict = {
+        'top': math.floor(extent_dict['top'] * 10) / 10,
+        'right': math.floor(extent_dict['right'] * 10) / 10,
+        'bottom': math.ceil(extent_dict['bottom'] * 10) / 10,
+        'left': math.ceil(extent_dict['left'] * 10) / 10
+    }
+
     if not os.path.exists(filepath):
         return False
     else:
         nc_extent = get_netcdf_extent(filepath)
-        return (extent_dict.get('top') <= nc_extent.get('top')) and (extent_dict.get('left') <= nc_extent.get('left')) and (extent_dict.get('bottom') >= nc_extent.get('bottom')) and (extent_dict.get('right') >= nc_extent.get('right')) #type:ignore
+        return (extent_dict.get('top') <= nc_extent.get('top')) and (extent_dict.get('left') >= nc_extent.get('left')) and (extent_dict.get('bottom') >= nc_extent.get('bottom')) and (extent_dict.get('right') <= nc_extent.get('right')) #type:ignore
 
 def get_rows_cols(filename):
     dataset = xr.open_dataset(filename)
@@ -502,7 +505,7 @@ def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, comp
         
         # Create data variable
         var_dims = tuple(dimensions)
-        var = ds.createVariable(var_name, data.dtype, var_dims, zlib=compress, complevel=complevel, fill_value=fill_value)
+        var = ds.createVariable(var_name, data.dtype, var_dims, zlib=compress, complevel=complevel, fill_value=fill_value) #type:ignore
         var[:] = data
         
         # Add global attributes

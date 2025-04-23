@@ -91,8 +91,8 @@ def run(silent_mode=False, config_file=None, gui = None):
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                    Version 1.3.2                    |
-        |                      2025-04-18                     |
+        |                    Version 1.3.3                    |
+        |                      2025-04-22                     |
         |                                                     |
         |                                                     |
         |                   Matthias Knüttel                  |
@@ -199,7 +199,6 @@ def run(silent_mode=False, config_file=None, gui = None):
 
     lst = [i * int(final_shape[0] / no_tiles) for i in range(no_tiles)] + [final_shape[0]]
     extents = [[extent[2] + lst[i+1] * resolution, extent[1], extent[2] + lst[i] * resolution, extent[3]]for i in range(no_tiles)]
-    # extents = [[round(val, 4) for val in sublist] for sublist in extents]
 
     for idx, extent in enumerate(extents):
         if gui != None:

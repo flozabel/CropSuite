@@ -301,8 +301,11 @@ def parallel_processing(current_data, extent, fine_resolution, output_dir, func_
                 for task in month_tasks:
                     process_day_slice(task)
                 """
-                with ProcessPoolExecutor(max_workers=max_proc) as executor:
-                    executor.map(process_day_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
+                try:
+                    with ProcessPoolExecutor(max_workers=max_proc) as executor:
+                        executor.map(process_day_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
+                except Exception:
+                    parallel_processing(current_data, extent, fine_resolution, output_dir, func_type, landsea_mask, world_clim_data_dir)
                 
                 month_tasks = []
         if month != current_month:
@@ -478,6 +481,7 @@ def process_rrpcf_day(day, data, fine_resolution, landsea_mask, output_dir, crop
         order = 0 if method == 'nearest' else 1 if method == 'linear' else 3 if method == 'cubic' else 1
         data = zoom(data, (fine_resolution[0] / data.shape[0], fine_resolution[1] / data.shape[1]), order=order)
     data[np.isnan(landsea_mask)] = -1
+    data = np.clip(data, 0, 100)
     nc.write_to_netcdf(data, os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=7, nodata_value=-1) #type:ignore
     
 

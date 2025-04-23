@@ -62,7 +62,7 @@ def merge_outputs_no_overlap(results_path, config):
     filenames = ['crop_limiting_factor.tif', 'crop_suitability.tif', 'multiple_cropping.tif', 'optimal_sowing_date.tif', 'suitable_sowing_days.tif', 
                  'climate_suitability.tif', 'multiple_cropping_sum.tif', 'optimal_sowing_date_mc_first.tif', 'optimal_sowing_date_mc_second.tif', 
                  'optimal_sowing_date_mc_third.tif', 'climate_suitability_mc.tif', 'all_suitability_vals.tif', 'optimal_sowing_date_vernalization.tif',
-                 'soil_suitability.tif']
+                 'soil_suitability.tif', 'cr_temp.tif']
     areas = [d for d in next(os.walk(results_path))[1] if d.startswith('Area_')]
     print(' -> Found Areas: ')
     for area in areas:

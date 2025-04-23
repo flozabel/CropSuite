@@ -47,8 +47,8 @@ from src import plant_param_gui
 from src import config_gui as cfg
 warnings.filterwarnings('ignore')
 
-version = '1.3.2'
-date = '2025-04-18'
+version = '1.3.3'
+date = '2025-04-22'
 current_cfg = ''
 
 plant_param_dir = ''
@@ -2035,12 +2035,10 @@ def param_gui(config_file):
     pargui.ParamGUI(config_file=config_file)
 
 def get_available_crop_list():
+    return []
     try:
-        verified = r'U:\web\verified'
-        not_verified = r'U:\web\not_verified'
         if not os.path.exists(verified):
             return []
-        
         curr_crop_list = [f[:-4] for f in os.listdir(os.path.join('plant_params', 'available')) if str(f).endswith('.inf') and not str(f).startswith('._')]
         ver_crop_list = [f[:-4] for f in os.listdir(verified) if str(f).endswith('.inf') and not str(f).startswith('._')]
         unver_crop_list = [f[:-4] for f in os.listdir(not_verified) if str(f).endswith('.inf') and not str(f).startswith('._')]
@@ -2064,6 +2062,7 @@ def get_available_crop_list():
         return []
     
 def upload():
+    return
     try:
         verified = r'U:\web\verified'
         not_verified = r'U:\web\not_verified'
@@ -2097,12 +2096,9 @@ def crop_install_gui(config_ini):
     crop_window.title('CropSuite - Crop Selection')
     crop_window.resizable(0, 1) #type:ignore
     crop_window.focus_force()
-    font12 = f'Helvetica 12'
     font14 = f'Helvetica 14'
     
-    #lst = get_available_crop_list()
     lst = []
-
     Label(crop_window, text='Crops available', font=font14 + ' bold').pack(anchor='w')
     tree = ttk.Treeview(crop_window, columns=('Installed', 'Crop', 'Verified'), show='headings', selectmode='extended')
     tree.heading('Installed', text='Installed')
@@ -2119,8 +2115,6 @@ def crop_install_gui(config_ini):
 
     def new():
         plant_param_gui.open_gui(config_ini_path=config_ini, plant_inf=None)
-        #upload()
-        #lst = get_available_crop_list()
         lst = []
         update_treeview(tree, lst)
         crop_window.update()
@@ -2128,15 +2122,6 @@ def crop_install_gui(config_ini):
     def save():
         selected_items = tree.selection()
         items = [tree.item(item)['values'][1]+'.inf' for item in selected_items]
-        #web_source = r'U:\web'
-        #for item in items:
-        #    try:
-        #        shutil.copy(os.path.join(web_source, 'verified', item), os.path.join('plant_params', 'available'))
-        #    except:
-        #        try:
-        #            shutil.copy(os.path.join(web_source, 'not_verified', item), os.path.join('plant_params', 'available'))
-        #        except:
-        #            pass
         crop_window.destroy()
 
     def exit():
@@ -2164,23 +2149,12 @@ def plant_gui(config_ini):
     plant_window.focus_force()
     config_ini_dict = rci.read_ini_file(config_ini)
     plant_param_dir = config_ini_dict['files'].get('plant_param_dir', 'plant_params')
-
-    font12 = f'Helvetica 12'
     font14 = f'Helvetica 14'
-
     Label(plant_window, text='Select the desired crops (Multiple selection possible)', font=font14 + ' bold').pack()
-
     os.makedirs(os.path.join(plant_param_dir, 'available'), exist_ok=True)
-
+    
     def list_available():
         return sorted([crop.capitalize() for crop in os.listdir(os.path.join(plant_param_dir, 'available')) if crop.endswith('.inf') and not crop.startswith('._')])
-
-    def list_checked():
-        checked_indices = []
-        for i, item in enumerate(sorted([crop for crop in os.listdir(os.path.join(plant_param_dir, 'available')) if crop.endswith('.inf')])):
-            if item in sorted([crop for crop in os.listdir(os.path.join(plant_param_dir)) if crop.endswith('.inf')]):
-                checked_indices.append(i)
-        return checked_indices
 
     def select_all():
         for i in range(len(list_available())):
@@ -2200,7 +2174,6 @@ def plant_gui(config_ini):
         plant_window.update()
 
     def new():
-        #crop_install_gui(config_ini)
         plant_param_gui.open_gui(config_ini_path=config_ini, plant_inf=None)
         update_listbox(listbox, sorted(list_available()))
         plant_window.update()
@@ -2230,10 +2203,7 @@ def plant_gui(config_ini):
     frame.pack(padx=20, pady=20)
 
     def update_listbox(listbox, new_lst):
-        # Clear existing items
         listbox.delete(0, tk.END)
-        
-        # Insert new items
         for item in new_lst:
             listbox.insert(tk.END, item)
 
@@ -2258,9 +2228,6 @@ def plant_gui(config_ini):
             print(e)
         context_menu.post(event.x_root, event.y_root)
 
-    #if sys.platform == 'linux' or sys.platform == 'linux2' or sys.platform == 'win32' or sys.platform == 'win64':
-    #    listbox.bind("<Button-3>", on_right_click)
-    #else:
     listbox.bind("<Button-3>", on_right_click)
     listbox.bind("<Button-2>", on_right_click)
     listbox.bind("<Control-Button-1>", on_right_click)
@@ -2276,183 +2243,8 @@ def plant_gui(config_ini):
     ok_button.pack(side="left", padx=10)
     ex_button = Button(plant_window, text="Cancel", command=dest)
     ex_button.pack(side="left", padx=5)
-    #plant_window.wait_window()
     plant_window.mainloop()
-"""
-def get_empty_crop_dict():
-    def_plant = os.listdir(os.path.join('plant_params', 'available'))
-    def_plant = [plant for plant in def_plant if plant.endswith('.inf')][1]
-    def_plant = parse_file_to_dict(os.path.join('plant_params', 'available', def_plant))
 
-    for key in def_plant.keys():
-        if key.endswith('_vals') and key not in ['temp_vals', 'prec_vals', 'freqcropfail_vals']:
-            def_plant[key] = [0, 1]
-            def_plant[key.replace('_vals', '_suit')] = [1, 1]
-    name, copy = new_crop_name()
-    if copy == None:
-        def_plant['name'] = name
-        def_plant['growing_cycle'] = 1
-        def_plant['temp_vals'] = [10, 15, 20, 25]
-        def_plant['temp_suit'] = [0, 0.75, 1, 0]
-        def_plant['prec_vals'] = [250, 500, 750, 1000]
-        def_plant['prec_suit'] = [0, 0.75, 1, 0]
-        def_plant['freqcropfail_vals'] = [0, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225, 0.25]
-        def_plant['freqcropfail_vals'] = [1, 0.98, 0.95, 0.88, 0.73, 0.5, 0.27, 0.12, 0.05, 0.02, 0]
-    else:
-        def_plant = parse_file_to_dict(os.path.join('plant_params', 'available', f'{copy}.inf'))
-        def_plant['name'] = name
-    new_file = os.path.join('plant_params', 'available', f'{def_plant["name"]}.inf')
-    return def_plant, new_file
-
-
-def convert_to_number(value):
-    if value.lower() == 'y': return True
-    try:
-        if '.' in value: return float(value)
-        else:
-            try:
-                val = int(value)
-                return val
-            except: return str(value)
-    except ValueError: return value
-
-def parse_file_to_dict(file_path):
-    data_dict = {}
-    with open(file_path, 'r') as file:
-        for line in file:
-            if '=' in line:
-                if line.startswith('AddCon:'):
-                    key, value = line.split('=', 1)[0].strip(), line.split('=', 1)[1].strip()
-                    data_dict[key] = value
-                else:
-                    key, value = line.split('=')
-                    key, value = key.strip(), value.strip()
-                    if ',' in value:
-                        value = [convert_to_number(v.strip()) for v in value.split(',')]
-                    else:
-                        value = convert_to_number(value)
-                    data_dict[key] = value
-    return data_dict
-
-class add_conditions_window: 
-    def __init__(self, root, crop_dict):
-        self.root = root
-
-        crop = crop_dict.get('name', '').capitalize()
-
-        x, y = 550, 400
-        self.root.geometry(f'{x}x{y}+{(self.root.winfo_screenwidth() - x) // 2}+{(self.root.winfo_screenheight() - y) // 2}')
-        self.root.title(f'Additional Conditions - {crop}')
-        self.root.resizable(0, 0) #type:ignore
-        self.root.focus_force()
-
-        main_frame = tk.Frame(root)
-        main_frame.pack(fill=tk.BOTH, expand=1)
-
-        self.canvas = tk.Canvas(main_frame)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
-
-        scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.canvas.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        self.canvas.bind('<Configure>', lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-
-        self.table_frame = tk.Frame(self.canvas)
-        self.canvas.create_window((0, 0), window=self.table_frame, anchor="nw")
-        headers = ["#", "Parameter", "Start Day", "End Day", "Condition", "Value"]
-
-        widths = [3, 12, 5, 5, 5, 8]
-
-        for idx, text in enumerate(headers):
-            label = tk.Label(self.table_frame, text=text, padx=10, pady=5, width=widths[idx])
-            label.grid(row=0, column=idx)
-
-        self.row_data = []
-        self.row_count = 0
-
-        self.button_frame = tk.Frame(root)
-        self.button_frame.pack(fill=tk.X)
-
-        cancel_button = tk.Button(self.button_frame, text="Cancel", command=self.root.quit)
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        add_button = tk.Button(self.button_frame, text="Add", command=lambda: self.add_row(crop_dict))
-        add_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        remove_button = tk.Button(self.button_frame, text="Remove", command=self.remove_row)
-        remove_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        save_button = tk.Button(self.button_frame, text="Save", command=self.save_data)
-        save_button.pack(side=tk.RIGHT, padx=5, pady=5)
-
-        for i in range(100):
-            if f'AddCon:{i}' in crop_dict.keys():
-                first = 0 if crop_dict.get(f'AddCon:{i}').split(',')[0] == 'Temperature' else 1
-                second = int(crop_dict.get(f'AddCon:{i}').split(',')[1])-1
-                third = int(crop_dict.get(f'AddCon:{i}').split(',')[2])-1
-                cond = crop_dict.get(f'AddCon:{i}').split(',')[3]
-                fourth = 0 if cond == '>' else 1 if cond == '>=' else 2 if cond == '<=' else 3 
-                fifth = float(crop_dict.get(f'AddCon:{i}').split(',')[4])
-                self.add_row(crop_dict, values=[first, second, third, fourth, fifth])
-
-        #prec_req_after_sow, prec_req_days = int(crop_dict.get('prec_req_after_sow', 20)), int(crop_dict.get('prec_req_days', 14)
-        #self.add_row(crop_dict, values=[1, 0, prec_req_days, 1, prec_req_after_sow])
-
-    def add_row(self, crop_dict, values=[0, 0, 0, 0, 0]):
-        self.row_count += 1
-        row_idx = self.row_count
-
-        lgc = int(crop_dict.get('growing_cycle', 0))
-        widths = [3, 12, 5, 5, 5, 8]
-
-        row_num_label = tk.Label(self.table_frame, text=str(row_idx), padx=10, pady=5, width=widths[0])
-        row_num_label.grid(row=row_idx, column=0)
-        param_combobox = ttk.Combobox(self.table_frame, values=["Temperature", "Precipitation"], width=widths[1])
-        param_combobox.grid(row=row_idx, column=1)
-        start_combobox = ttk.Combobox(self.table_frame, values=list(range(1, lgc+2)), width=widths[2]) #type:ignore
-        start_combobox.grid(row=row_idx, column=2)
-        end_combobox = ttk.Combobox(self.table_frame, values=list(range(1, lgc+2)), width=widths[3]) #type:ignore
-        end_combobox.grid(row=row_idx, column=3)
-        condition_combobox = ttk.Combobox(self.table_frame, values=[">", ">=", "<=", "<"], width=widths[4])
-        condition_combobox.grid(row=row_idx, column=4)
-        entry_value = tk.Entry(self.table_frame, width=widths[5])
-        entry_value.grid(row=row_idx, column=5)
-
-        if values != [0, 0, 0, 0, 0]:
-            param_combobox.current(values[0])
-            start_combobox.current(values[1])
-            end_combobox.current(values[2])
-            condition_combobox.current(values[3])
-            condition_combobox.current(values[3])
-            entry_value.delete(0, END)
-            entry_value.insert(0, values[4])
-        self.row_data.append([param_combobox, start_combobox, end_combobox, condition_combobox, entry_value])
-
-    def remove_row(self):
-        if self.row_data:
-            for widget in self.row_data[-1]:
-                widget.grid_forget()  # Remove widgets
-            self.row_data.pop()  # Remove from data structure
-            self.row_count -= 1
-
-    def save_data(self):
-        data = []
-        for i, row in enumerate(self.row_data, start=1):
-            param = row[0].get()
-            start = row[1].get()
-            end = row[2].get()
-            condition = row[3].get()
-            val = row[4].get()
-            data.append([i, param, start, end, condition, val])
-        self.result = data
-        self.data_saved = True  # Mark that data was saved
-        self.root.destroy()
-    
-    def cancel(self):
-        self.data_saved = False  # Indicate data was not saved
-        self.root.destroy()
-"""
 
 def exit_all():
     sys.exit()
