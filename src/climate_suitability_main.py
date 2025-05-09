@@ -618,11 +618,17 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
 
     no_threads, av_ram = dt.get_cpu_ram()
 
+    pixeltoprocess = temperature.shape[0] * temperature.shape[1]
+    wintercrop_factor = 0.3 if wintercrop else 1
+    system_factor = {'darwin': 5, 'win32': 1}.get(sys.platform, 0.25)
+    max_proc = int(np.clip(math.ceil(av_ram / (pixeltoprocess / 1e6)) * system_factor * wintercrop_factor, 1, no_threads-1))
+
+    """
     area = abs((extent[3] - extent[1]) * (extent[0] - extent[2]))
     if wintercrop:
-        factor = {'darwin': 10, 'win32': 20}.get(sys.platform, 60)
+        factor = {'darwin': 20, 'win32': 20}.get(sys.platform, 40)
     else:
-        factor = {'darwin': 6, 'win32': 12}.get(sys.platform, 10)
+        factor = {'darwin': 12, 'win32': 12}.get(sys.platform, 10)
     resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
     if wintercrop:
         max_proc = int(np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads-1))
@@ -633,7 +639,8 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         max_proc = np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads-1)
         max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads-1)
         max_proc = np.clip(int(max_proc), 1, no_threads-1)
-    
+    """
+
     ### Climate Extremes / Climate Variability Module ###
     
     if (len(rrpcf_files) > 0) and climate_config['climatevariability'].get('consider_variability', False):
@@ -688,24 +695,28 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             sunshinesuit = data[3].astype(np.int8)
 
     else:
-        print(f'Limiting to {max_proc} cores')
-        while True:
-            if len(os.listdir(tmp)) >= 365:
+        cpl = False
+        while not cpl:
+            print(f'Limiting to {max_proc} cores')
+            while True:
+                if len(os.listdir(tmp)) >= 365:
+                    break
+                
+                if max_proc == 1:
+                    for day in range(365):
+                        process_day_concfut(day) 
+                else:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc) as executor:
+                        executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))
+                        
+                collect()        
                 break
-            
-            if max_proc == 1:
-                for day in range(365):
-                    process_day_concfut(day) 
-            else:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc) as executor:
-                    executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))
-                    
-            collect()        
-            break
-        try:
-            temperature, precipitation, failuresuit, sunshinesuit = read_tif_data_to_tempprecfail_arr((final_shape[0], final_shape[1], 365, 4))
-        except:
-            dt.throw_exit_error('Error reading climate suitability data from daily geotiff files. Exit.')
+            try:
+                temperature, precipitation, failuresuit, sunshinesuit = read_tif_data_to_tempprecfail_arr((final_shape[0], final_shape[1], 365, 4))
+                cpl = True
+            except:
+                print('Error reading climate suitability data from daily geotiff files. Retrying.')
+                [os.remove(os.path.join(tmp, f)) for f in os.listdir(tmp)]
         collect()
 
     del crop_failures
@@ -1013,7 +1024,7 @@ def climate_suitability(climate_config, extent, temperature, precipitation, land
         if climate_config['climatevariability'].get('consider_variability', False):
             ret_paths = [os.path.join(os.path.split(results_path)[0]+'_var',\
                                     os.path.split(results_path)[1]), os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1])]
-            if os.path.exists(os.path.join(ret_paths[0], plant, 'climate_suitability.tif')) and os.path.exists(os.path.join(ret_paths[1], plant, 'climate_suitability.tif')):
+            if os.path.exists(os.path.join(ret_paths[1], plant, 'climate_suitability.tif')):
                 print(f' -> {plant} already created. Skipping')
                 continue
         else:

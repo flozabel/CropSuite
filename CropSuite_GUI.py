@@ -47,8 +47,8 @@ from src import plant_param_gui
 from src import config_gui as cfg
 warnings.filterwarnings('ignore')
 
-version = '1.3.3'
-date = '2025-04-22'
+version = '1.3.4'
+date = '2025-05-08'
 current_cfg = ''
 
 plant_param_dir = ''
@@ -459,7 +459,7 @@ def read_netcdf(netcdf_file, layer=[0, 0], extent=[0, 0, 0, 0]):
         try:
             lon, lat = ds.coords['longitude'].values, ds.coords['latitude'].values
         except:
-            lon, lat = np.asarray([-180, 180]), np.asarray([-90, 90])
+            lon, lat = np.asarray([-180, 180]), np.asarray([-90, 90]) #type:ignore
     x_min, x_max = lon.min(), lon.max()
     y_min, y_max = lat.min(), lat.max()
     

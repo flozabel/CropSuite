@@ -85,7 +85,7 @@ if [ "$ONLINE" = true ]; then
     echo
     echo "Installing required packages..."
     pip install \
-        numpy \
+        numpy==1.26.4 \
         scipy==1.15.2 \
         matplotlib==3.10.1 \
         rasterio==1.4.3 \

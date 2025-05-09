@@ -14,10 +14,10 @@ def check_versions():
         sys.exit(1)
 
     compatible_packages = {
-        'numpy': ['1.24.3', '1.25.0', '1.26.4', '2.2.4', '2.2.5'],
+        'numpy': ['1.24.3', '1.25.0', '1.26.4'],
         'scipy': ['1.9.3', '1.11.2', '1.11.4', '1.14.1', '1.15.1', '1.15.2'],
         'rasterio': ['1.3.9', '1.3.10', '1.3.11', '1.4.1', '1.4.3'],
-        'matplotlib': ['3.6.3', '3.9.2', '3.10.1'],
+        'matplotlib': ['3.6.3', '3.8.4', '3.9.2', '3.10.1'],
         'xarray': ['2023.6.0', '2024.10.0', '2025.1.2', '2025.3.1'],
         'numba': ['0.60.0', '0.61.0', '0.61.2'],
         'rio_cogeo': ['5.3.3', '5.3.6', '5.4.1'],
@@ -37,9 +37,8 @@ def check_versions():
             version = getattr(module, '__version__', 'unknown')
             if version not in allowed_versions:
                 notcomp.append(f'{module.__name__} may not be compatible with {version}.\n    Please use one of the following versions: {", ".join(allowed_versions)}\n    >> pip install {module.__name__}=={allowed_versions[-1]}')
-        except ModuleNotFoundError:
+        except Exception as e:
             notcomp.append(f"{pkg} is NOT installed.")
-
 
     if len(notcomp) > 0:
         print("\nSome packages are not compatible with the current version:\n")
@@ -55,3 +54,7 @@ Therefore, it is recommended to use the tested and compatible versions.''')
             exit()
 
     return True
+
+
+if __name__ == '__main__':
+    check_versions()

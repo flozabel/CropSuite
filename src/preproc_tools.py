@@ -198,15 +198,17 @@ def parallel_processing(current_data, extent, worldclim_factors, fine_resolution
         current_month = month_map[day]
         if month != current_month and month_tasks:
             if len(month_tasks) > 0:
-                """
-                    ### DEBUG ###
-
-                for task in month_tasks:
-                    process_slice(task)
-                """
-                with ProcessPoolExecutor(max_workers=max_proc) as executor:
-                    executor.map(process_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
-                
+                if (fine_resolution[0] * fine_resolution[1]) < 250000:
+                    for task in month_tasks:
+                        process_slice(task)     
+                else:              
+                    try:
+                        with ProcessPoolExecutor(max_workers=max_proc) as executor:
+                            executor.map(process_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
+                    except:
+                        print('Error during Multiprocessing. Reverting to for loop...')
+                        for task in month_tasks:
+                            process_slice(task)
                 month_tasks = []
         if month != current_month:
             month = current_month
@@ -267,7 +269,7 @@ def get_nc_data(file_list, start_year, end_year, extent = [0, 0, 0, 0], downscal
         
         if mode == 'temp':
             print('    -> Downscaling temperature data')
-            dtshape =  ds[varname].values[1].shape
+            dtshape = ds[varname].values[1].shape
             world_clim_dir = config['files'].get('worldclim_temperature_data_dir')
             ext = nc.check_extent_load_file(os.path.join(world_clim_dir, f'factors_month_1.nc'), extent=extent)
             if not ext:

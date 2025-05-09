@@ -125,7 +125,6 @@ def get_variable_name_from_nc(ds):
         ds = xr.open_dataset(ds)
     return list(ds.data_vars)[0]
 
-
 def get_y_resolution(nc_file_path):
     dataset = xr.open_dataset(nc_file_path)
     lat = dataset.get('lat', dataset.get('latitude'))
@@ -196,7 +195,7 @@ def geotiff_to_netcdf(geotiff_files, netcdf_filename):
 
     combined_data = xr.concat(data_arrays, dim="month")
     combined_data = combined_data.assign_coords(month=np.arange(1, len(geotiff_files) + 1))
-    encoding = dict(zlib=True, complevel=5)
+    encoding = dict(zlib=True, complevel=4)
     ds = xr.Dataset({"data": combined_data})
 
     ds['lat'].attrs['units'] = 'degrees_north'
@@ -577,7 +576,7 @@ def create_append_netcdf(filename, data, dimensions=['lat', 'lon'], extent=None,
     if isinstance(info_text, str):
         ds.attrs['Info'] = info_text
 
-    encoding = {var_name: {'zlib': True, 'complevel': 9}}
+    encoding = {var_name: {'zlib': True, 'complevel': 4}}
     print(f"Writing to {filename}")
 
     if os.path.exists(filename):
@@ -662,7 +661,7 @@ def merge_netcdf_files(file_list, output_file, overlap=0, nodata_value=False, in
         ds.attrs['Info'] = info_text
 
     merged_data['lat'] = ('lat', np.linspace(y_max, y_min, int(merged_data.dims['lat'])))
-    encoding = {var: {'zlib': True, 'complevel': 1} for var in merged_data.data_vars}
+    encoding = {var: {'zlib': True, 'complevel': 4} for var in merged_data.data_vars}
 
     client = Client(n_workers=12)
     

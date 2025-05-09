@@ -57,7 +57,7 @@ echo Upgrading pip...
 python -m pip install --upgrade pip
 
 echo Installing required packages...
-python -m pip install numpy ^
+python -m pip install numpy==1.26.4 ^
                             scipy==1.15.2 ^
                             matplotlib==3.10.1 ^
                             rasterio==1.4.3 ^

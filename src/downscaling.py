@@ -109,7 +109,7 @@ def worldclim_downscaling_temp_singleslice(data_slice, extent, worldclim_factors
     if worldclim_factors.shape != fine_resolution:
         worldclim_factors = dt.resize_array_mean(worldclim_factors, fine_resolution)
     temp_data = skt.resize(data_slice - 273.15, fine_resolution, order=1, mode='edge', anti_aliasing=False).astype(np.float32)
-    nc.write_to_netcdf(temp_data, os.path.join(output_dir, f'ds_temp_{day}.nc'), extent=extent, compress=True, complevel=9) #type:ignore
+    nc.write_to_netcdf(temp_data, os.path.join(output_dir, f'ds_temp_{day}.nc'), extent=extent, compress=True, complevel=4) #type:ignore
 
 def temperature_interpolation_bilinear(config_file, extent, output_dir):
     climate_data_dir = os.path.join(config_file['files']['climate_data_dir'])
@@ -266,7 +266,7 @@ def process_day_slice(args):
         data *= worldclim_factors
     data = (data * 10).astype(np.int16)
     data[landsea_mask] = -32767
-    nc.write_to_netcdf(data, output_file, extent=extent, compress=True, complevel=9, nodata_value=-32767)  # type: ignore
+    nc.write_to_netcdf(data, output_file, extent=extent, compress=True, complevel=4, nodata_value=-32767)  # type: ignore
 
 def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█'):
     percent = f"{100 * (iteration / float(total)):.{decimals}f}"
@@ -295,18 +295,30 @@ def parallel_processing(current_data, extent, fine_resolution, output_dir, func_
             except:
                 pass
             if len(month_tasks) > 0:
+
+                if (fine_resolution[0] * fine_resolution[1]) < 250000:
+                    for task in month_tasks:
+                        process_day_slice(task)  
+                else:              
+                    try:
+                        with ProcessPoolExecutor(max_workers=max_proc) as executor:
+                            executor.map(process_day_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
+                    except:
+                        print('Error during Multiprocessing. Reverting to for loop...')
+                        for task in month_tasks:
+                            process_day_slice(task)  
                 """
                     ### DEBUG ###
 
                 for task in month_tasks:
                     process_day_slice(task)
-                """
+                
                 try:
                     with ProcessPoolExecutor(max_workers=max_proc) as executor:
                         executor.map(process_day_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
                 except Exception:
                     parallel_processing(current_data, extent, fine_resolution, output_dir, func_type, landsea_mask, world_clim_data_dir)
-                
+                """
                 month_tasks = []
         if month != current_month:
             month = current_month
@@ -381,7 +393,7 @@ def worldclim_downscaling_prec_singleslice(data_slice, extent, worldclim_factors
     if worldclim_factors.shape != fine_resolution:
         worldclim_factors = dt.resize_array_mean(worldclim_factors, fine_resolution)
     prec_data = (skt.resize(data_slice * 3600 * 24, fine_resolution, order=1, mode='edge', anti_aliasing=False) * worldclim_factors).astype(np.float16)
-    nc.write_to_netcdf(prec_data, os.path.join(output_dir, f'ds_prec_{day}.nc'), extent=extent, compress=True, complevel=9) #type:ignore
+    nc.write_to_netcdf(prec_data, os.path.join(output_dir, f'ds_prec_{day}.nc'), extent=extent, compress=True, complevel=4) #type:ignore
 
 def process_precday_interp(day, prec_data, extent, prec_thres, fine_dem_shape, land_sea_mask, output_dir, prec_nodata, mode='nearest'):
     if os.path.exists(os.path.join(output_dir, f'ds_prec_{day}.tif')) or os.path.exists(os.path.join(output_dir, f'ds_prec_{day}.nc')):
@@ -482,7 +494,7 @@ def process_rrpcf_day(day, data, fine_resolution, landsea_mask, output_dir, crop
         data = zoom(data, (fine_resolution[0] / data.shape[0], fine_resolution[1] / data.shape[1]), order=order)
     data[np.isnan(landsea_mask)] = -1
     data = np.clip(data, 0, 100)
-    nc.write_to_netcdf(data, os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=7, nodata_value=-1) #type:ignore
+    nc.write_to_netcdf(data, os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=4, nodata_value=-1) #type:ignore
     
 
 def interpolate_rrpcf(config_file, extent, area_name, crops):
@@ -533,18 +545,19 @@ def interpolate_rrpcf(config_file, extent, area_name, crops):
             if not data.shape == fine_resolution:
                 order = 0 if method == 'nearest' else 1 if method == 'linear' else 3 if method == 'cubic' else 1
                 dayslice = zoom(data, (fine_resolution[0] / data.shape[0], fine_resolution[1] / data.shape[1]), order=order)
+                dayslice = np.clip(dayslice, 0, 100)
                 dayslice[np.isnan(landsea_mask)] = -1
-                nc.write_to_netcdf(dayslice.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=9, nodata_value=-1) #type:ignore
+                nc.write_to_netcdf(dayslice.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=4, nodata_value=-1) #type:ignore
             else:
                 data[np.isnan(landsea_mask)] = -1
-                nc.write_to_netcdf(data.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=9, nodata_value=-1) #type:ignore
+                nc.write_to_netcdf(data.astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_0.nc'), extent=extent, compress=True, complevel=4, nodata_value=-1) #type:ignore
         else:
             if data.shape[:2] == fine_resolution:
                 data[np.isnan(landsea_mask)] = -1
                 for day in range(data.shape[-1]):
                     if os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc')):
                         continue
-                    nc.write_to_netcdf(data[..., day].astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=9, nodata_value=-1) #type:ignore
+                    nc.write_to_netcdf(data[..., day].astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=4, nodata_value=-1) #type:ignore
             else:
                 area = float((extent[0] - extent[2]) * (extent[3] - extent[1]))
                 resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}

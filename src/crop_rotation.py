@@ -159,5 +159,5 @@ def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
 
 
 if __name__ == '__main__':
-    crop_rotation('config_bra_mriesm.ini')
+    crop_rotation('world.ini')
 

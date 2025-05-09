@@ -12,9 +12,12 @@ except:
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk #type:ignore
+import cartopy
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
+import sys
+from pathlib import Path
 
 class ConfigGUI(tk.Tk):
     def __init__(self, config_ini_path):
@@ -259,7 +262,15 @@ class ConfigGUI(tk.Tk):
         spinbox.bind("<FocusOut>", lambda e: self.validate_spbxs(var_name))
         spinbox.bind("<<Increment>>", lambda e: self.validate_spbxs(var_name))
         spinbox.bind("<<Decrement>>", lambda e: self.validate_spbxs(var_name))
- 
+    
+    def cartopy_shapefile_exists(self):
+        if sys.platform == "win32":
+            base_path = Path(os.environ["USERPROFILE"]) / ".local" / "share" / "cartopy" / "shapefiles" / "natural_earth" / "cultural"
+        else:
+            base_path = Path.home() / ".local" / "share" / "cartopy" / "shapefiles" / "natural_earth" / "cultural"
+        shp_path = base_path / "ne_10m_admin_0_boundary_lines_land.shp"
+        return shp_path.exists()
+
     def create_canvas(self, parent):
         frame = tk.Frame(parent)
         frame.pack(fill='both', expand=True)
@@ -269,10 +280,15 @@ class ConfigGUI(tk.Tk):
         self.fig.patch.set_facecolor(tuple(c / 65535 for c in frame.winfo_rgb(frame.cget("bg")))) #type: ignore
         self.ax.set_facecolor('white')
 
-        self.ax.coastlines() #type:ignore
-        self.ax.add_feature(cfeature.LAND, facecolor='beige')#type:ignore
-        self.ax.add_feature(cfeature.OCEAN, facecolor='skyblue')#type:ignore
-        self.ax.add_feature(cfeature.BORDERS, edgecolor='black')#type:ignore
+        if self.cartopy_shapefile_exists():
+            try:
+                #cartopy.io.shapereader.natural_earth(resolution='110m', category='physical', name='land')
+                self.ax.coastlines() #type:ignore
+                self.ax.add_feature(cfeature.LAND, facecolor='beige')#type:ignore
+                self.ax.add_feature(cfeature.OCEAN, facecolor='skyblue')#type:ignore
+                self.ax.add_feature(cfeature.BORDERS, edgecolor='black')#type:ignore
+            except:
+                pass
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=frame)
         self.canvas.get_tk_widget().pack(side='bottom', fill='both', expand=True)
@@ -761,5 +777,5 @@ class ConfigGUI(tk.Tk):
 
 if __name__ == "__main__":
     #pass
-    ConfigGUI(os.path.join('U:\\Source Code\\CropSuite\\config.ini'))
+    ConfigGUI(os.path.join('U:\\Source Code\\CropSuite\\world.ini')).mainloop()
     #app.mainloop()

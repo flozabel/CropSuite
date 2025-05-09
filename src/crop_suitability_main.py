@@ -515,16 +515,22 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
         return layer, nodata
 
     elif weighting_method == 1:
+        file_list = file_list[:3]
         layers = []
         for layer_file in file_list:
             layer, nodata = dt.load_specified_lines(layer_file, [domain[1], domain[0], domain[3], domain[2]], all_bands=False)
+            if layer.shape != final_shape:
+                nan_mask = layer == nodata
+                nan_mask = dt.interpolate_nanmask(nan_mask, final_shape)
+                layer, nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
             layers.append(layer)
+
         nan_mask = layers[0] == nodata
         mean = np.nanmean(layers, axis=0)
-        mean[nan_mask] = nodata
-        if mean.shape != final_shape:
-            nan_mask = dt.interpolate_nanmask(nan_mask, final_shape)
-            mean, nodata = resize_array_interp(mean, final_shape, nodata=nodata, method='nearest')
+        # mean[nan_mask] = nodata
+        # if mean.shape != final_shape:
+        #     nan_mask = dt.interpolate_nanmask(nan_mask, final_shape)
+        #     mean, nodata = resize_array_interp(mean, final_shape, nodata=nodata, method='nearest')
 
         new_file = mean / conversion_factor
         new_file[nan_mask] = nodata  #type:ignore
@@ -534,11 +540,12 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
         layers = []
         for layer_file in file_list:
             layer, nodata = dt.load_specified_lines(layer_file, [domain[1], domain[0], domain[3], domain[2]], all_bands=False)
+            layer, nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
             layers.append(layer)
 
-        for idx, layer in enumerate(layers):
-            if layer.shape != final_shape:
-                layers[idx], nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
+        #for idx, layer in enumerate(layers):
+        #    if layer.shape != final_shape:
+        #        layers[idx], nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
 
         nan_mask = layers[0] == nodata
 

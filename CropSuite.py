@@ -83,6 +83,7 @@ def run(silent_mode=False, config_file=None, gui = None):
     import shutil
     import gc
     import re
+    import psutil
 
     print('''\
         
@@ -91,8 +92,8 @@ def run(silent_mode=False, config_file=None, gui = None):
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                    Version 1.3.3                    |
-        |                      2025-04-22                     |
+        |                    Version 1.3.4                    |
+        |                      2025-05-07                     |
         |                                                     |
         |                                                     |
         |                   Matthias Knüttel                  |
@@ -184,9 +185,14 @@ def run(silent_mode=False, config_file=None, gui = None):
 
 
     ##### CLIMATE SUITABILITY #####
-    resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
-    no_tiles = np.clip(math.ceil(area / 700 / resolution_factor.get(int(climate_config['options'].get('resolution', 5)), 1) ** 2), 1, 100000) if climate_config['options']['use_scheduler'] else 1
     final_shape = dt.get_resolution_array(climate_config, extent, True)
+    ram = int((psutil.virtual_memory().total / (1024 ** 3)) * 0.85)
+    no_tiles = int(np.clip((final_shape[0] * final_shape[1]) * 10e-6 / ram, 1, 100000)) if climate_config['options'].get('use_scheduler', 1) else 1
+
+    """
+    resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
+    no_tiles = np.clip(math.ceil(area / 300 / resolution_factor.get(int(climate_config['options'].get('resolution', 5)), 1) ** 2), 1, 100000) if climate_config['options']['use_scheduler'] else 1
+    """
 
     def adjust_extent_0(extent, resolution):
         return extent[2] + ((extent[0] - extent[2]) // resolution ) * resolution
