@@ -13,14 +13,11 @@ except:
     from src import temp_interpolation as ti
     from src import prec_interpolation as pi
 from scipy.stats import linregress
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import math
 from skimage import transform as skt
-#from multiprocessing import Pool
+import shutil
 from scipy.ndimage import zoom
-#from scipy.interpolate import RegularGridInterpolator
-#from skimage.transform import resize
-#from numba import njit
 
 temp = os.path.join(os.getcwd(), 'temp')
 os.makedirs(temp, exist_ok=True)
@@ -270,6 +267,8 @@ def process_day_slice(args):
 
 def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█'):
     percent = f"{100 * (iteration / float(total)):.{decimals}f}"
+    max_len, _ = shutil.get_terminal_size(fallback=(80, 24))
+    length = np.min([length, int(max_len) - len(prefix) - 8 - len(suffix)])
     filled_length = int(length * iteration // total)
     bar = fill * filled_length + '-' * (length - filled_length)
     print(f'\r{prefix} |{bar}| {percent}% {suffix}', end='\r')
@@ -278,9 +277,8 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 
 def parallel_processing(current_data, extent, fine_resolution, output_dir, func_type, landsea_mask, world_clim_data_dir):
     cpu, ram = dt.get_cpu_ram()
-    area = (extent[3] - extent[1]) * (extent[0] - extent[2])
-    max_proc = np.clip(int(ram / ((area / 50000) * 7)), 1, cpu-1)
-    print(f'\n -> Using {max_proc} cores')
+
+    max_proc = np.clip(math.floor((ram * 0.85) / (fine_resolution[0] * fine_resolution[1] * 5.6e-9)), 1, cpu-1)
     month_map = np.searchsorted(np.cumsum([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]), np.arange(365))
     missing_days = [day for day in range(365) if not os.path.exists(os.path.join(output_dir, f'ds_{func_type}_{day}.nc'))]
     if not missing_days:
@@ -296,10 +294,11 @@ def parallel_processing(current_data, extent, fine_resolution, output_dir, func_
                 pass
             if len(month_tasks) > 0:
 
-                if (fine_resolution[0] * fine_resolution[1]) < 250000:
+                if (fine_resolution[0] * fine_resolution[1]) < 2500000 or max_proc == 1:
                     for task in month_tasks:
                         process_day_slice(task)  
-                else:              
+                else:     
+                    # print(f'\n -> Using {max_proc} cores')         
                     try:
                         with ProcessPoolExecutor(max_workers=max_proc) as executor:
                             executor.map(process_day_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
@@ -511,7 +510,12 @@ def interpolate_rrpcf(config_file, extent, area_name, crops):
 
     for crop in crops:
         crop = os.path.splitext(crop)[0].lower()
-        water = 'ir' if config_file['options'].get('irrigation', '0') == '1' else 'rf'
+        #water = 'ir' if config_file['options'].get('irrigation', False) else 'rf'
+        v = config_file['options'].get('irrigation', 'n')
+        irrigation = (v.lower() == 'y' if isinstance(v, str) and v.lower() in ['y', 'n'] else bool(np.mean([int(c) for c in v]) > 0.5) if isinstance(v, str) and
+                      all(c in '01' for c in v) else bool(v) if isinstance(v, (int, float)) else False)
+        water = 'ir' if irrigation else 'rf'
+
         for ext in ['.tif', '.nc']:
             rrpcf_file = os.path.join(climate_data_dir, f'rrpcf_{crop}_{water}{ext}')
             if os.path.exists(rrpcf_file):
@@ -559,21 +563,18 @@ def interpolate_rrpcf(config_file, extent, area_name, crops):
                         continue
                     nc.write_to_netcdf(data[..., day].astype(np.int16), os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'), extent=extent, compress=True, complevel=4, nodata_value=-1) #type:ignore
             else:
-                area = float((extent[0] - extent[2]) * (extent[3] - extent[1]))
-                resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
-                resfact = resolution_factor.get(int(config_file['options'].get('resolution', 5)), 1)
-                sysfact = {'win32': 1, 'darwin': 8, 'linux': 0.6}.get(sys.platform, 1)
                 cpu, ram = dt.get_cpu_ram()
-                worker = int(np.clip(int((ram * 10000) / (area / resfact) * sysfact), 1, cpu-1))
-                print(f'Using {worker} workers')
+                sysfact = {'win32': 1, 'darwin': 2, 'linux': 1}.get(sys.platform, 1)
+                max_proc = np.clip(int(math.floor((ram * 0.85) / (fine_resolution[0] * fine_resolution[1] * 5.6e-9) * sysfact)), 1, cpu-1)
+                print(f'Using {max_proc} workers')
 
-                if worker == 1:
+                if (fine_resolution[0] * fine_resolution[1]) < 2500000 or max_proc == 1:
                     for day in range(365):
                         if not os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc')):
                             process_rrpcf_day(day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method)
                 else:
                     try:
-                        with ProcessPoolExecutor(max_workers=worker) as executor:
+                        with ProcessPoolExecutor(max_workers=max_proc) as executor:
                             tasks = [executor.submit(process_rrpcf_day, day, data[..., day], fine_resolution, landsea_mask, output_dir, crop, water, extent, method) for day in range(365) if not os.path.exists(os.path.join(output_dir, f'ds_rrpcf_{crop}_{water}_{day}.nc'))]
                             for future in tasks:
                                 future.result()

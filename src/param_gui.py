@@ -150,7 +150,6 @@ class ParamGUI:
         frame5.pack(anchor='w', padx=5, pady=5, fill='x')
         frame6.pack(anchor='w', padx=5, pady=5, fill='x')    
 
-
     def create_conversion_factor(self):
         self.convfact_val = DoubleVar(self.param_window, float(self.param_dict.get('conversion_factor'))) #type:ignore
         #self.convfact_val.trace_add('write', self.auto_save)
@@ -274,7 +273,6 @@ class ParamGUI:
             self.factors_entry4.config(state='normal')
             self.factors_entry5.config(state='normal')
             self.factors_entry6.config(state='normal')
-
 
     def refresh_gui(self):
         self.update_param()

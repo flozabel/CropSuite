@@ -31,7 +31,7 @@ class Tee:
     def close(self):
         self.file.close()
 
-def run(silent_mode=False, config_file=None, gui = None):
+def run(silent_mode=False, config_file=None, gui = None, no_version_check = False):
     # Check required libraries
     req_libs = ['os', 'configparser', 'numpy', 'sys', 'multiprocessing', 'gc', 'numba', 'scipy', 'statistics',\
             'glob', 'rasterio', 'rio_cogeo', 'concurrent', 'psutil', 'matplotlib', 'math', 'xarray', 'numba', 'datetime']
@@ -66,6 +66,7 @@ def run(silent_mode=False, config_file=None, gui = None):
         from src import downscaling as ds
         from src import preproc_tools as pti
         from src import crop_rotation as cro
+        from src import output_rrpcf as orp
     except:
         import climate_suitability_main as csm
         import read_climate_ini as rci
@@ -78,34 +79,41 @@ def run(silent_mode=False, config_file=None, gui = None):
         import downscaling as ds
         import preproc_tools as pti   
         import crop_rotation as cro  
+        import output_rrpcf as orp
     import numpy as np
     import math
     import shutil
     import gc
     import re
     import psutil
+    from datetime import datetime
 
-    print('''\
+    with open('CropSuite_GUI.py', 'r', encoding='utf-8') as file:
+        text = file.read()
+    version = re.search(r"version\s*=\s*'(\d+\.\d+\.\d+)'", text).group(1) #type:ignore
+    date = re.search(r"date\s*=\s*'(\d{4}-\d{2}-\d{2})'", text).group(1) #type:ignore
+
+    print(f'''\
         
         =======================================================
         |                                                     |
         |                                                     |    
         |                      CropSuite                      |
         |                                                     |
-        |                    Version 1.3.4                    |
-        |                      2025-05-07                     |
+        |                    Version {version}                    |
+        |                      {date}                     |
         |                                                     |
         |                                                     |
         |                   Matthias Knüttel                  |
         |                     Florian Zabel                   |
-        |                         2025                        |
+        |                         {datetime.now().year}                        |
         |                                                     |
         |                                                     |
         |          Department of Environmental Sciences       |      
         |                 University of Basel                 |
         |                                                     |
         |                                                     |
-        |           © 2023-2025 All rights reserved           |
+        |           © 2023-{datetime.now().year} All rights reserved           |
         |                                                     |
         =======================================================
         
@@ -171,13 +179,8 @@ def run(silent_mode=False, config_file=None, gui = None):
     print('\nDownscaling the climate data\n')
     prec_files, prec_dailyfiles = ds.interpolate_precipitation(climate_config, extent, area_name)
     temp_files, temp_dailyfiles = ds.interpolate_temperature(climate_config, extent, area_name)
-    if climate_config['climatevariability'].get('consider_variability', True):
+    if int(climate_config['climatevariability'].get('consider_variability', True)) > 0:
         ds.interpolate_rrpcf(climate_config, extent,  area_name,  [f for f in os.listdir(climate_config['files'].get('plant_param_dir', 'plant_params')) if f.endswith('.inf')])
-
-    #if not dt.extent_is_covered_by_second_extent(list(nc.get_maximum_extent_from_list(temp_files).values()), extent):
-    #    [os.remove(f) for f in prec_files+temp_files]
-    #    prec_files, prec_dailyfiles = ds.interpolate_precipitation(climate_config, extent, area_name)
-    #    temp_files, temp_dailyfiles = ds.interpolate_temperature(climate_config, extent, area_name)
 
     if gui != None:
         gui.set_downscaling(completed=True)
@@ -188,12 +191,7 @@ def run(silent_mode=False, config_file=None, gui = None):
     final_shape = dt.get_resolution_array(climate_config, extent, True)
     ram = int((psutil.virtual_memory().total / (1024 ** 3)) * 0.85)
     no_tiles = int(np.clip((final_shape[0] * final_shape[1]) * 10e-6 / ram, 1, 100000)) if climate_config['options'].get('use_scheduler', 1) else 1
-
-    """
-    resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
-    no_tiles = np.clip(math.ceil(area / 300 / resolution_factor.get(int(climate_config['options'].get('resolution', 5)), 1) ** 2), 1, 100000) if climate_config['options']['use_scheduler'] else 1
-    """
-
+    full_extent = extent
     def adjust_extent_0(extent, resolution):
         return extent[2] + ((extent[0] - extent[2]) // resolution ) * resolution
 
@@ -233,10 +231,10 @@ def run(silent_mode=False, config_file=None, gui = None):
             rpp.plot_all_parameterizations(plant_params_formulas, plant_params)
         print(' -> Plant data loaded')
 
-        if climate_config['climatevariability'].get('consider_variability', True):
-            climsuits = [os.path.join(pt, area_name, crop, 'climate_suitability.tif') for pt in [os.path.split(temp)[0]+'_var', os.path.split(temp)[0]+'_novar'] for crop in list(plant_params.keys())]
-        else:
-            climsuits = [os.path.join(os.path.split(temp)[0]+'_novar', area_name, crop, 'climate_suitability.tif') for crop in list(plant_params.keys())]
+        v = int(climate_config['climatevariability'].get('consider_variability', 1))
+        sfx = ['_novar', '_var'] if v == 2 else ['_novar' if v == 0 else '_var']
+        climsuits = [os.path.join(os.path.split(temp)[0] + s, area_name, c, 'climate_suitability.tif') for s in sfx for c in plant_params]
+        
         if all(os.path.exists(clims) for clims in climsuits):
             print('\nClimate Suitability Data is already existing.\n -> Using existing data.\n')
         else:
@@ -283,9 +281,7 @@ def run(silent_mode=False, config_file=None, gui = None):
                     for c in os.listdir(temp)
                     if c != 'crop_rotation' and os.path.isdir(os.path.join(temp, c))
                 ])
-
-                #climsuit = np.dstack([(dt.load_specified_lines(tif, extent, False)[0]).astype(np.int8) for tif in [os.path.join(temp, crop, 'climate_suitability.tif') for crop in os.listdir(temp) if crop != 'crop_rotation' and os.path.isdir(os.path.join(temp, crop))]])
-                #limiting = np.dstack([(dt.load_specified_lines(tif, extent, False)[0]).astype(np.int8) for tif in [os.path.join(temp, crop, 'limiting_factor.tif') for crop in os.listdir(temp) if crop != 'crop_rotation' and os.path.isdir(os.path.join(temp, crop))]])
+                
                 land_sea_mask, _ = dt.load_specified_lines(climate_config['files']['land_sea_mask'], extent, False)
                 fine_resolution = (climsuit.shape[0], climsuit.shape[1])
                 if land_sea_mask.shape != fine_resolution:
@@ -321,11 +317,15 @@ def run(silent_mode=False, config_file=None, gui = None):
             continue
         if len(extents) > 1:
             areas = [d for d in next(os.walk(output_dir))[1] if d.startswith('Area_')]
-            north_values = [int(value[:-1]) for item in areas for value in re.findall(r'(-?\d+N)', item)]
+            north_values = [int(a or b) for item in areas for a, b in re.findall(r'(?<=_|-)(-?\d+)N|^(-?\d+)N', item)]
             east_values = [int(value[:-1]) for item in areas for value in re.findall(r'(-?\d+E)', item)]
             merged_result = os.path.join(output_dir, f'Area_{max(north_values)}N{min(east_values)}E-{min(north_values)}N{max(east_values)}E')
             if not os.path.exists(merged_result):
                 mg.merge_outputs_no_overlap(output_dir, climate_config)
+
+
+    ##### OUTPUT RRPCF COMBINED #####
+    orp.write_rrpcf_day(climate_config, full_extent)
 
     ##### CLEAN UP #####
 
@@ -335,10 +335,12 @@ def run(silent_mode=False, config_file=None, gui = None):
                 for output_dir in [climate_config['files']['output_dir']+'_var', climate_config['files']['output_dir']+'_novar']:
                     if os.path.exists(output_dir):
                         shutil.rmtree(os.path.join(output_dir, f'Area_{int(extent[0])}N{int(extent[1])}E-{int(extent[2])}N{int(extent[3])}E'))
+        for s in ['_var', '_novar']:
+            for dp, _, fn in os.walk(climate_config['files']['output_dir'] + s):
+                [os.remove(os.path.join(dp, f)) for f in fn if f in {"climatesuitability.tif", "all_climlim_factors.tif", "all_suitability_vals.tif"}]
 
     if climate_config['options'].get('remove_downscaled_climate', False):
         [os.remove(os.path.join(os.path.dirname(prec_files[0]), f)) for f in os.listdir(os.path.dirname(prec_files[0])) if os.path.isfile(os.path.join(os.path.dirname(prec_files[0]), f))]
-
         try:
             os.removedirs(os.path.dirname(temp_files[0]))
             os.removedirs(os.path.dirname(prec_files[0]))
@@ -370,6 +372,7 @@ if __name__ == '__main__':
             silent = "-silent" in args
             config = args[args.index("-config") + 1] if "-config" in args and len(args) > args.index("-config") + 1 else None
             debug = "-debug" in args
+            noversioncheck = "-noversioncheck" in args
         except:
             print("""Usage:
                 -> python CropSuite.py
@@ -383,7 +386,7 @@ if __name__ == '__main__':
                 original_stdout = sys.stdout
                 sys.stdout = tee
 
-            run(silent, config)
+            run(silent, config, gui=None, no_version_check=noversioncheck)
 
         finally:
             if debug:

@@ -3,6 +3,7 @@ from tkinter import * #type:ignore
 from tkinter import ttk
 import tkinter as tk
 from tkinter import filedialog
+import tkinter.font as tkfont
 import numpy as np
 import rasterio
 from pathlib import Path
@@ -15,7 +16,7 @@ import cartopy.feature as cfeature
 import cartopy.crs as ccrs
 import matplotlib.colors as clr
 from datetime import datetime
-
+import re
 try:
     import limfact_analyzer as lfa
     import data_tools as dt
@@ -25,17 +26,79 @@ except:
     from src import data_tools as dt
     from src import viewer_plot as vp
 
-version = '1.2.0'
+with open('CropSuite_GUI.py', 'r', encoding='utf-8') as file:
+    version = re.search(r"version\s*=\s*'(\d+\.\d+\.\d+)'", file.readlines()[52]).group(1) #type:ignore
+
+
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
+
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 20
+        y += self.widget.winfo_rooty() + 20
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, background="#ffffe0", relief='solid', borderwidth=1)
+        label.pack()
+
+    def hide_tip(self, event=None):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+class ToolTipS:
+    def __init__(self, widget):
+        self.widget = widget
+        self.tooltip = None
+        self.after_id = None
+        self.text = ""
+        self.tip_window = None
+
+    def schedule(self, text, x, y, delay=250):
+        self.cancel()
+        self.text = text
+        self.after_id = self.widget.after(delay, lambda: self.show(text, x, y))
+
+    def show(self, text, x, y):
+        if self.tip_window:
+            self.hide()
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=text, background="#ffffe0", relief='solid', borderwidth=1)
+        label.pack()
+
+    def hide(self, event=None):
+        self.cancel()
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+    def cancel(self):
+        if self.after_id:
+            self.widget.after_cancel(self.after_id)
+            self.after_id = None
 
 class ViewerGUI(tk.Toplevel):
-    def __init__(self, start_path, master=None):
+    def __init__(self, start_path, config, old, master=None):
         super().__init__()
+        self.config_file = config
+        self.old_viewer = old
         self.current_path = Path(start_path)
         self.qual_val = tk.DoubleVar(master=self, value=50)
         self.focus_force()
         x, y = 1200, 800
         self.geometry(f'{x}x{y}+{(self.winfo_screenwidth() - x) // 2}+{(self.winfo_screenheight() - y) // 2}')
-        self.title('CropSuite Viewer - Beta')
+        self.title(f'CropSuite Viewer - v{version}')
         self.resizable(1, 1) #type:ignore
         self.create_widgets()
         self.cmap_getter = vp.ColormapGetter()        
@@ -44,13 +107,6 @@ class ViewerGUI(tk.Toplevel):
         self.create_control_panel()
         self.create_map_frame()
     
-    """
-    def add_tab(self, title):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text=title)
-        return frame
-    """
-
     def create_control_panel(self):
         self.bcolor = self.winfo_rgb(self.cget("bg"))
         self.bcolor = "#{:02x}{:02x}{:02x}".format(self.bcolor[0] // 256, self.bcolor[1] // 256, self.bcolor[2] // 256)
@@ -58,20 +114,9 @@ class ViewerGUI(tk.Toplevel):
         c_panel_frm = tk.Frame(self, width=280, height=600, bg=self.bcolor)
         c_panel_frm.pack(side='left', fill='both')
 
-        #style = ttk.Style()
-        #style.configure("TNotebook", tabposition="n")
-        #self.notebook = ttk.Notebook(c_panel_frm, style="TNotebook")
-        #self.notebook.pack(fill='both', expand=True, padx=5, pady=5)
-        #self.main_tab = self.add_tab("Results")
-        #self.climate_tab = self.add_tab("Climate Data")
-
         control_frame = tk.Frame(c_panel_frm, width=280, height=600, bg=self.bcolor)
         control_frame.pack(side='left', fill='y')
         self.fill_control_panel(control_frame)
-
-        #climate_frame = tk.Frame(self.climate_tab, bg=self.bcolor)
-        #climate_frame.pack(side='left', fill='both', expand=True)
-        #self.fill_climate_frame(climate_frame)
 
     def create_map_frame(self):
         self.map_frame = tk.Frame(self)
@@ -87,7 +132,17 @@ class ViewerGUI(tk.Toplevel):
         self.canvas.get_tk_widget().pack(fill='both', expand=True)
         self.plot_empty()
 
+    def switch_to_old_version(self):
+        self.destroy()
+        self.old_viewer(self.config_file)
+        
     def fill_control_panel(self, parent):
+        if self.old_viewer != None:
+            switch_frame = ttk.Frame(parent)
+            switch_frame.pack(fill=tk.X, pady=(0, 5))
+            switch_button = ttk.Button(switch_frame, text='Switch to old version', command=self.switch_to_old_version)
+            switch_button.pack(anchor='w', padx=5)
+
         filesel_frame = ttk.LabelFrame(parent, text='File Selection')
         filesel_frame.pack()
         self.create_path_entry(filesel_frame)
@@ -102,6 +157,10 @@ class ViewerGUI(tk.Toplevel):
         compare_frame = ttk.LabelFrame(parent, text='Compare')
         compare_frame.pack(fill='x')
         self.compare_options(compare_frame)
+
+        layer_frame = ttk.LabelFrame(parent, text='Multilayer Options')
+        layer_frame.pack(fill='x')
+        self.multlay_options(layer_frame)
 
         plotopt_frame = ttk.LabelFrame(parent, text='Plotting Options')
         plotopt_frame.pack(fill='x')
@@ -131,6 +190,9 @@ class ViewerGUI(tk.Toplevel):
         v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.treeview.configure(yscrollcommand=v_scrollbar.set)
         self.treeview.bind("<<TreeviewSelect>>", self.item_selected)
+        self.treeview.bind("<Motion>", self.on_treeview_hover)
+        self.treeview.bind("<Leave>", lambda e: self.treeview_tooltip.hide())
+        self.treeview_tooltip = ToolTipS(self.treeview)
 
         try:
             self.file_image = tk.PhotoImage(master=self, file="src/file.png")
@@ -144,6 +206,17 @@ class ViewerGUI(tk.Toplevel):
         start_dir_entries = os.listdir(start_path)
         self.recursive_fill_treeview(parent_path=start_path, directory_entries=start_dir_entries,
                                      parent_iid=parent_iid, f_image=self.file_image, d_image=self.folder_image, treeview=self.treeview)
+
+    def on_treeview_hover(self, event):
+        region = self.treeview.identify("region", event.x, event.y)
+        iid = self.treeview.identify_row(event.y)
+        if region != "tree" or not iid:
+            self.treeview_tooltip.hide()
+            return
+        full_path = self.get_full_path(iid)
+        x = self.treeview.winfo_rootx() + event.x + 20
+        y = self.treeview.winfo_rooty() + event.y + 10
+        self.treeview_tooltip.schedule(full_path, x, y, delay=250)
 
     def recursive_fill_treeview(self, parent_path, directory_entries, parent_iid, f_image, d_image, treeview):
         for name in sorted(directory_entries):
@@ -209,8 +282,6 @@ class ViewerGUI(tk.Toplevel):
             item_iid = selected_item[0]
             selected_path = self.get_full_path(item_iid)
 
-            #selected_iid = self.treeview.selection()[0]
-            #selected_path = self.fsobjects[selected_iid]
             self.path_entry.delete(0, tk.END)
             self.path_entry.insert(0, str(selected_path))
             self.set_default_values(os.path.basename(selected_path))
@@ -225,43 +296,22 @@ class ViewerGUI(tk.Toplevel):
                 self.plot_button.config(state='normal')
                 self.check_extent_proj(selected_path)
 
-                if self.comp_val.get() == 1:
-                    av_mods = vp.get_models(str(selected_path))
-                    if len(av_mods) > 0:
-                        self.models_combobox.config(values = av_mods, state='normal')
-                        self.models_combobox['values'] = av_mods
-                        self.models_combobox.current(0)
-                        self.mod_combo_changed(None, selected_value=str(av_mods[0]))
-                    else:
-                        old_path = self.models_combobox.get()
-                        new_path = os.path.join(os.path.dirname(old_path), os.path.basename(selected_path))
-                        if os.path.exists(new_path):
-                            self.mod_combo_changed(None, selected_value=new_path)
-                            self.models_combobox.config(state='normal')
-                            self.models_combobox['values'] = [new_path]
-                            self.models_combobox.after(100, lambda: self.models_combobox.current(0))
-                            self.activate_compare()
-                            #self.models_combobox.config(values=[new_path], state='normal')
-                            #self.models_combobox.set(new_path)
-            
-                            self.mod_lab.config(text=f'Parent: {os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(new_path))))}')
-                            self.are_lab.config(text=f'Directory: {os.path.basename(os.path.dirname(os.path.dirname(new_path)))}')
-                            self.crp_lab.config(text=f'Crop: {os.path.basename(os.path.dirname(new_path))}')
-                            self.fnm_lab.config(text=f'Filename: {os.path.basename(new_path)}')
-                        else:
-                            self.comp_val.set(0)
-                            self.models_combobox.config(values = [], state='disabled')
-                            self.selfile_but.config(state='disabled')
+                bnds = vp.get_layers(selected_path)
+                if bnds > 1:
+                    self.band_count.set(bnds)
+                    self.layer_spbx.config(state='normal')
+                    self.mlayer_cb.config(state='normal')
                 else:
-                    self.models_combobox.config(values = [], state='disabled')
-                    self.selfile_but.config(state='disabled')
-                    self.mod_lab.config(text='Parent:')
-                    self.are_lab.config(text='Directory:')
-                    self.crp_lab.config(text='Crop:')
-                    self.fnm_lab.config(text='Filename:')
+                    self.band_count.set(1)
+                    self.layer_spbx.config(state='disabled')
+                    self.mlayer_mean.set(0)
+                    self.mlayer_cb.config(state='disabled')
             else:
                 self.plot_button.config(state='disabled')
-
+                self.mlayer_mean.set(0)
+                self.mlayer_cb.config(state='disabled')
+                self.band_count.set(0)
+                self.layer_spbx.config(state='disabled')
         except:
             pass
 
@@ -292,23 +342,13 @@ class ViewerGUI(tk.Toplevel):
 
     def compare_options(self, parent):
         comp_togram = vp.ToggledFrame(parent, 'Comparison options')
-        comp_togram.pack(fill=tk.X)
+        comp_togram.pack(fill='x', expand=True)
         self.comp_val = tk.IntVar(self, 0)
         comp_cb = tk.Checkbutton(comp_togram.sub_frame, text='Compare', variable=self.comp_val, command=self.activate_compare)
         comp_cb.pack(padx=5, anchor='w')
         
-        self.models_combobox = ttk.Combobox(comp_togram.sub_frame, values=[], state='disabled')
-        self.models_combobox.pack(padx=5, anchor='w', fill='x', expand=True)
-        self.models_combobox.bind('<<ComboboxSelected>>', self.mod_combo_changed)
-
-        self.mod_lab = tk.Label(comp_togram.sub_frame, text='Parent: ')
-        self.are_lab = tk.Label(comp_togram.sub_frame, text='Directory: ')
-        self.crp_lab = tk.Label(comp_togram.sub_frame, text='Crop: ')
-        self.fnm_lab = tk.Label(comp_togram.sub_frame, text='Filename: ')
-        self.mod_lab.pack(padx=5, anchor='w')
-        self.are_lab.pack(padx=5, anchor='w')
-        self.crp_lab.pack(padx=5, anchor='w')
-        self.fnm_lab.pack(padx=5, anchor='w')
+        self.comp_file = tk.Label(comp_togram.sub_frame, text='Selected File: ', width=30, anchor='w')
+        self.comp_file.pack(padx=5, anchor='w', fill='x', expand=True)
 
         self.selfile_but = tk.Button(comp_togram.sub_frame, text='Select File', command=self.select_file, state='disabled')
         self.selfile_but.pack(padx=5, fill='x')
@@ -317,10 +357,9 @@ class ViewerGUI(tk.Toplevel):
         filetypes = [('Geospatial Datasets', '*.tif;*.tiff;*.nc;*.nc4')]
         file_path = filedialog.askopenfilename(title="Select a file", filetypes=filetypes)
         if file_path:
-            self.models_combobox['values'] = [file_path]
-            self.models_combobox.config(state='disabled')
-            self.mod_combo_changed(None, selected_value=file_path)
-            self.models_combobox.set(file_path)
+            self.comp_file.config(text=f'Selected File: {file_path}', anchor='w', justify='left')
+            if len(file_path) > 15:
+                ToolTip(self.comp_file, f"Selected File: {file_path}")
             self.activate_compare()
         else:
             return None
@@ -328,55 +367,44 @@ class ViewerGUI(tk.Toplevel):
     def activate_compare(self):
         if self.comp_val.get() == 1:
             self.selfile_but.config(state='normal')
-            av_models = vp.get_models(str(self.path_entry.get()))
-            if len(av_models) > 0:
-                self.models_combobox.config(values = av_models, state='readonly')
-
-            fname = os.path.splitext(os.path.basename(self.path_entry.get()))[0]
-            if fname in ['climate_suitability', 'crop_suitability', 'soil_suitability', 'climate_suitability_mc']:
-                self.cmap_box.current(22)
-                self.min_val, self.max_val = -50, 50
-                self.cbar_label = 'Suitability Change []'
-                self.labels = ['Strong Decrease', 'Slight Decrease', 'No Changes', 'Slight Increase', 'Strong Increase']
-            elif fname in ['multiple_cropping']:
-                self.cmap_box.current(22)
-                self.min_val, self.max_val = -2, 2
-                self.cbar_label = 'Change in Potential Harvests []'
-                self.labels = ['2 Harvests less', '1 Harvest less', 'Unchanged', '1 Harvest more', '2 Harvests more']
-                self.nodata_patch = 'none'  
-                self.default_classified = True          
-            elif fname in ['optimal_sowing_date', 'optimal_sowing_date_mc_first', 'optimal_sowing_date_mc_second', 'optimal_sowing_date_mc_third',
-                   'optimal_sowing_date_vernalization', 'optimal_sowing_date_with_vernalization', 'start_growing_cycle_after_vernalization']:
-                self.cmap_box.current(24)
-                self.min_val, self.max_val = -105, 105
-                self.cbar_label = 'Shift of optimal Sowing Date [days]'
-                self.labels = ['> 3 Months earlier', '2 Months earlier', '1 Month earlier', 'No significant change', '1 Month later', '2 Months later', '> 3 Months later']
-            elif fname in ['suitable_sowing_days']:
-                self.cmap_box.current(22)
-                self.min_val, self.max_val = -365, 365
-                self.cbar_label = 'Change in Suitable sowing days [days]'
-                self.labels = ['Strong Decrease', 'Slight Decrease', 'No Changes', 'Slight Increase', 'Strong Increase']
-            
+            self.set_default_values(os.path.basename(self.path_entry.get()))
         else:
-            self.models_combobox.config(values = [], state='disabled')
-            self.mod_lab.config(text='Parent:')
-            self.are_lab.config(text='Directory:')
-            self.crp_lab.config(text='Crop:')
-            self.fnm_lab.config(text='Filename:')
             self.selfile_but.config(state='disabled')
             self.set_default_values(os.path.basename(self.path_entry.get()))
 
-    def mod_combo_changed(self, event, selected_value=None):
-        if selected_value is None:
-            selected_value = self.models_combobox.get()
-        curr_crop = os.path.basename(os.path.dirname(selected_value))
-        curr_modl = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(selected_value))))
-        curr_area = os.path.basename(os.path.dirname(os.path.dirname(selected_value)))
-        self.mod_lab.config(text=f'Parent: {curr_modl}')
-        self.are_lab.config(text=f'Directory: {curr_area}')
-        self.crp_lab.config(text=f'Crop: {curr_crop}')
-        self.fnm_lab.config(text=f'Filename: {os.path.basename(selected_value)}')
 
+    ### MULTILAYER OPTIONS ###
+
+    def multlay_options(self, parent):
+        lay_frame = tk.Frame(parent)
+        lay_frame.pack(fill=tk.X, pady=2, expand=True)
+        self.layer_var = tk.IntVar(master=self, value=1)
+        self.band_count = tk.IntVar(master=self, value=0)
+        self.layer_spbx = ttk.Spinbox(lay_frame, from_=1, to=365, textvariable=self.layer_var, width=5, increment=1, state=DISABLED)
+        self.layer_spbx.pack(side="left")
+
+        self.label_var = tk.StringVar()
+        self.band_label = ttk.Label(lay_frame, textvariable=self.label_var)
+        self.band_label.pack(side="left")
+
+        self.band_count.trace_add("write", self.update_label)
+        for ev in ("<FocusOut>", "<Return>", "<<Increment>>", "<<Decrement>>"):
+            self.layer_spbx.bind(ev, lambda e: self.plot())
+
+        mn_frame = tk.Frame(parent)
+        mn_frame.pack(fill='x', pady=2, expand=True)
+        self.mlayer_mean = tk.IntVar(master=self, value=0)
+        self.mlayer_cb = tk.Checkbutton(mn_frame, variable=self.mlayer_mean, text='Time course (mean)', state='disabled', command=self.on_check)
+        self.mlayer_cb.pack(side='left')
+
+    def on_check(self):
+        if self.mlayer_mean.get() == 1:
+            self.layer_spbx.configure(state="disabled")
+        else:
+            self.layer_spbx.configure(state="normal")
+
+    def update_label(self, *args):
+        self.label_var.set(f"out of {self.band_count.get()}")
 
     ### PLOTTING OPTIONS ###
 
@@ -426,56 +454,109 @@ class ViewerGUI(tk.Toplevel):
         filepath = self.path_entry.get()
         filename = os.path.basename(filepath)
         print(filepath)
-        data, bounds = vp.read_geotiff(filepath=filepath, resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()))
 
-        if self.comp_val.get() == 1 and os.path.exists(self.models_combobox.get()):
-            comp_data, bounds = vp.read_geotiff(filepath=self.models_combobox.get(), resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()))
-            if os.path.splitext(os.path.basename(self.path_entry.get()))[0] in ['optimal_sowing_date', 'optimal_sowing_date_mc_first', 'optimal_sowing_date_mc_second', 'optimal_sowing_date_mc_third',
-                   'optimal_sowing_date_vernalization', 'optimal_sowing_date_with_vernalization', 'start_growing_cycle_after_vernalization']:
-                data[(np.isnan(comp_data)) | (comp_data == 0)] = np.nan
-                comp_data[(np.isnan(data)) | (data == 0)] = np.nan
-                data = comp_data - data
-                data[data > 182] = data[data > 182] - 180
-                data[data < -182] = data[data < -182] + 180
-            else:
-                data = comp_data - data
-
-        colormap = vp.ColormapGetter().get_colormap(self.cmap_box.get())
-        projection = vp.ProjectionGetter().get_projection(self.proj_box.get())
-        if isinstance(colormap, list):
-            cmap = clr.LinearSegmentedColormap.from_list('', colormap)
-            color_list = colormap
-        else:
-            cmap = cm.get_cmap(colormap)
-            color_list = cmap(np.linspace(0, 1, 254))
-
-        x_range = bounds.right - bounds.left
-        grid_x = 5 if x_range <= 20 else 10 if x_range <= 60 else 30 if x_range <= 180 else 60
+        day = -1
+        if str(self.layer_spbx.cget("state")) == "normal":
+            day = int(self.layer_var.get())
+            print(f' -> Loading data for #{day}')
         
-        y_range = bounds.top - bounds.bottom
-        grid_y = 5 if y_range <= 20 else 10 if y_range <= 60 else 30
-
-        if self.class_val.get():
-            self.plot_on_canvas_discrete(data, bounds, color_list, self.labels, projection, grid_x, grid_y, self.nodata_patch, 3)
+        if self.mlayer_mean.get() == 1:
+            data, bounds = vp.read_geotiff_mean(filepath=filepath, resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()))
+            self.plot_2d_on_canvas(data)
+            return
         else:
-            self.plot_on_canvas_continous(data, bounds, cmap, projection, grid_x, grid_y)
+            data, bounds = vp.read_geotiff(filepath=filepath, resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()), day=day)
+
+            if self.comp_val.get() == 1 and os.path.exists(self.comp_file.cget("text").split(': ')[1]):
+                comp_data, bounds = vp.read_geotiff(filepath=self.comp_file.cget("text").split(': ')[1], resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()))
+                if os.path.splitext(os.path.basename(self.path_entry.get()))[0] in ['optimal_sowing_date', 'optimal_sowing_date_mc_first', 'optimal_sowing_date_mc_second', 'optimal_sowing_date_mc_third',
+                    'optimal_sowing_date_vernalization', 'optimal_sowing_date_with_vernalization', 'start_growing_cycle_after_vernalization']:
+                    data[(np.isnan(comp_data)) | (comp_data == 0)] = np.nan
+                    comp_data[(np.isnan(data)) | (data == 0)] = np.nan
+                    data = comp_data - data
+                    data[data > 182] = data[data > 182] - 180
+                    data[data < -182] = data[data < -182] + 180
+                else:
+                    data = comp_data - data
+
+            colormap = vp.ColormapGetter().get_colormap(self.cmap_box.get())
+            projection = vp.ProjectionGetter().get_projection(self.proj_box.get())
+            if isinstance(colormap, list):
+                cmap = clr.LinearSegmentedColormap.from_list('', colormap)
+                color_list = colormap
+            else:
+                cmap = cm.get_cmap(colormap)
+                color_list = cmap(np.linspace(0, 1, 254))
+
+            x_range = bounds.right - bounds.left
+            grid_x = 5 if x_range <= 20 else 10 if x_range <= 60 else 30 if x_range <= 180 else 60
+            
+            y_range = bounds.top - bounds.bottom
+            grid_y = 5 if y_range <= 20 else 10 if y_range <= 60 else 30
+
+            if self.class_val.get():
+                self.plot_on_canvas_discrete(data, bounds, color_list, self.labels, projection, grid_x, grid_y, self.nodata_patch, 3)
+            else:
+                self.plot_on_canvas_continous(data, bounds, cmap, projection, grid_x, grid_y)
 
     def set_default_values(self, f):
         f = os.path.splitext(f)[0]
         self.nodata_patch = 'none'
         self.nodata_val = -9999
         self.default_classified = False
-        if f in ['climate_suitability', 'crop_suitability', 'soil_suitability', 'climate_suitability_mc']:
+        if (
+            f in ['climate_suitability', 'crop_suitability', 'soil_suitability']
+            or os.path.splitext(f)[0].endswith('_climatesuitability')
+            or os.path.splitext(f)[0].endswith('_cropsuitability')
+        ) and not f.startswith('1+2'):
             if self.comp_val.get() == 1:
                 self.cmap_box.current(22)
+                self.min_val, self.max_val = -100, 100
             else:
                 self.cmap_box.current(1)
+                self.min_val, self.max_val = 0, 100
             self.class_cb.config(state='normal')
             self.class_val.set(False)
-            self.min_val, self.max_val = 0, 100
             self.cbar_label = 'Suitability []'
             self.nodata_patch = 'first'
             self.labels = ['Unsuitable', 'Marginally Suitable', 'Moderately Suitable', 'Highly Suitable', 'Very highly Suitable']
+        elif f in ['climate_suitability_mc']:
+            if self.comp_val.get() == 1:
+                self.cmap_box.current(22)
+                self.min_val, self.max_val = -300, 300
+            else:
+                self.cmap_box.current(1)
+                self.min_val, self.max_val = 0, 300
+            self.class_cb.config(state='normal')
+            self.class_val.set(False)
+            self.cbar_label = 'Multiple Cropping Suitability []'
+            self.nodata_patch = 'first'
+            self.labels = ['Unsuitable', 'Marginally Suitable', 'Moderately Suitable', 'Highly Suitable', 'Very highly Suitable']
+        elif f in ['1+2_climatesuitability', '1+2_cropsuitability']:
+            if self.comp_val.get() == 1:
+                self.cmap_box.current(22)
+                self.min_val, self.max_val = -200, 200
+            else:
+                self.cmap_box.current(1)
+                self.min_val, self.max_val = 0, 200
+            self.class_cb.config(state='normal')
+            self.class_val.set(False)
+            self.cbar_label = 'Crop Rotation Suitability []'
+            self.nodata_patch = 'first'
+            self.labels = ['Unsuitable', 'Marginally Suitable', 'Moderately Suitable', 'Highly Suitable', 'Very highly Suitable']
+        elif f in ['optimal_sowing_date_rrpcf', 'optimal_sowing_date_mc_first_rrpcf', 'optimal_sowing_date_mc_second_rrpcf', 'optimal_sowing_date_mc_third_rrpcf'] or\
+            os.path.splitext(f)[0].endswith('_rrpcf'):
+            if self.comp_val.get() == 1:
+                self.cmap_box.current(22)
+                self.min_val, self.max_val = -100, 100
+            else:
+                self.cmap_box.current(192)
+                self.min_val, self.max_val = 0, 100
+            self.class_cb.config(state='normal')
+            self.class_val.set(False)
+            self.cbar_label = 'rrpcf []'
+            self.nodata_patch = 'first'
+            self.labels = ['No impact', 'Moderate Impact', 'High Impact', 'Unsuitable', 'Unsuitable']                
         elif f in ['crop_limiting_factor']:
             self.cmap_box.current(21)
             self.class_val.set(True)
@@ -487,34 +568,39 @@ class ViewerGUI(tk.Toplevel):
         elif f in ['multiple_cropping']:
             if self.comp_val.get() == 1:
                 self.cmap_box.current(22)
+                self.min_val, self.max_val = -3, 3
             else:
                 self.cmap_box.current(3)
+                self.min_val, self.max_val = 0, 3
             self.class_val.set(True)
             self.class_cb.config(state='disabled')
-            self.min_val, self.max_val = 0, 3
             self.cbar_label = 'Potential Harvests []'
             self.nodata_patch = 'first'
             self.default_classified = True
             self.labels = ['Unsuitable', 'One Harvest', 'Two Harvests', 'Three Harvests']
         elif f in ['optimal_sowing_date', 'optimal_sowing_date_mc_first', 'optimal_sowing_date_mc_second', 'optimal_sowing_date_mc_third',
-                   'optimal_sowing_date_vernalization', 'optimal_sowing_date_with_vernalization', 'start_growing_cycle_after_vernalization']:
+                   'optimal_sowing_date_vernalization', 'optimal_sowing_date_with_vernalization', 'start_growing_cycle_after_vernalization'] or\
+                    os.path.splitext(f)[0].endswith('_climate_harvestdate') or os.path.splitext(f)[0].endswith('_climate_sowingdate') or\
+                        os.path.splitext(f)[0].endswith('_crop_harvestdate') or os.path.splitext(f)[0].endswith('_crop_sowingdate'):
             if self.comp_val.get() == 1:
                 self.cmap_box.current(24)
+                self.min_val, self.max_val = -182, 182
             else:
                 self.cmap_box.current(7)
+                self.min_val, self.max_val = 0, 365
             self.class_cb.config(state='normal')
             self.class_val.set(False)
-            self.min_val, self.max_val = 0, 365
             self.cbar_label = 'Optimal Sowing Date [doy]'
             self.labels = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
         elif f in ['suitable_sowing_days']:
             if self.comp_val.get() == 1:
                 self.cmap_box.current(22)
+                self.min_val, self.max_val = -365, 365
             else:
                 self.cmap_box.current(4)
+                self.min_val, self.max_val = 0, 365
             self.class_cb.config(state='normal')
             self.class_val.set(False)
-            self.min_val, self.max_val = 0, 365
             self.cbar_label = 'Suitable Sowing Days [days]'
             self.labels = ['Less than 1 Month'] + [f'{i} Months' for i in range(2, 12)] + ['All year round']
             self.nodata_val = 0
@@ -548,7 +634,7 @@ class ViewerGUI(tk.Toplevel):
             self.min_val, self.max_val = 0, 100
             self.cbar_label = 'Gypsum Content [%]'
             self.labels = ['0 %', '1 %', '2 %', '3 %', '>4 %']
-        elif f in ['pH', 'pH_combined']:
+        elif f in ['pH', 'pH_combined', 'ph_after_liming']:
             if self.comp_val.get() == 1:
                 self.cmap_box.current(22)
             else:
@@ -558,6 +644,26 @@ class ViewerGUI(tk.Toplevel):
             self.min_val, self.max_val = 3, 11
             self.cbar_label = 'Soil pH []'
             self.labels = ['3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10-11']
+        elif f in ['ph_increase']:
+            if self.comp_val.get() == 1:
+                self.cmap_box.current(22)
+            else:
+                self.cmap_box.current(137)
+            self.class_cb.config(state='normal')
+            self.class_val.set(False)
+            self.min_val, self.max_val = 0, 2
+            self.cbar_label = 'Soil pH increase []'
+            self.labels = ['0', '0.5', '1.0', '1.5']
+        elif f in ['lime_application']:
+            if self.comp_val.get() == 1:
+                self.cmap_box.current(22)
+            else:
+                self.cmap_box.current(137)
+            self.class_cb.config(state='normal')
+            self.class_val.set(False)
+            self.min_val, self.max_val = 0, 20
+            self.cbar_label = 'Lime Application [t/ha]'
+            self.labels = ['0', '2.5', '5.0', '7.5', '10.0', '12.5', '15.0', '17.5', '20.0']        
         elif f in ['salinity', 'salinity_combined']:
             if self.comp_val.get() == 1:
                 self.cmap_box.current(22)
@@ -628,6 +734,19 @@ class ViewerGUI(tk.Toplevel):
         self.ax.clear()
         self.fig.clear()
 
+    def plot_2d_on_canvas(self, data):
+        self.ax.clear()
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        pl = self.ax.plot(data, linewidth=2, color='black')
+        self.ax.set_ylabel('Suitability')
+        self.ax.set_ylim((0, 100))
+        self.ax.set_xlim((0, 365))
+        self.ax.set_xlabel('Day of Year')
+        self.fig.tight_layout(pad=1) #type:ignore
+        self.canvas = self.fig.canvas
+        self.canvas.draw()
+
     def plot_on_canvas_continous(self, data, bounds, colormap, projection=None, griddist_x=30, griddist_y=30):
         if not hasattr(self, 'min_val') or not hasattr(self, 'max_val'):
             self.min_val = np.nanmin(data)
@@ -653,7 +772,7 @@ class ViewerGUI(tk.Toplevel):
         self.colorbar.set_label(self.cbar_label, fontsize=10)
         self.colorbar.ax.tick_params(labelsize=10)
         #self.ax.axis('off')
-        self.ax.set_title(f'Creation Date: {datetime.today().strftime("%Y-%m-%d")}\nFile: {self.path_entry.get()}\nCreated by CropSuite v{version}\n© Florian Zabel, Matthias Knüttel {datetime.today().strftime("%Y")}', loc='left', fontsize=6, color='black')
+        self.ax.set_title(f'Creation Date: {datetime.today().strftime("%Y-%m-%d")}\nFile: {self.path_entry.get()}\nCreated by CropSuite v{version}\n© {datetime.today().strftime("%Y")} Matthias Knüttel & Florian Zabel', loc='left', fontsize=6, color='black')
         self.fig.tight_layout(pad=1) #type:ignore
         self.canvas = self.fig.canvas
         self.canvas.draw()
@@ -803,5 +922,5 @@ class ViewerGUI(tk.Toplevel):
 
 if __name__ == '__main__':
     startpath = os.getcwd()
-    app = ViewerGUI(startpath)
+    app = ViewerGUI(startpath, '', None)
     app.mainloop()

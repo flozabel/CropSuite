@@ -3,16 +3,13 @@ from tkinter import ttk, filedialog
 import os
 try:
     import read_climate_ini as rci
-    import param_gui as pgi
     import preproc_gui as ppi
 except:
     from src import read_climate_ini as rci
-    from src import param_gui as pgi
     from src import preproc_gui as ppi
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk #type:ignore
-import cartopy
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
@@ -174,6 +171,18 @@ class ConfigGUI(tk.Tk):
         getattr(self, 'resolution_slider').set(min([0, 1, 2, 3, 4, 5, 6], key=lambda x: abs(x - float(value))))
         self.config_dict['options']['resolution'] = getattr(self, 'resolution_slider').get()
 
+    def add_radiobuttons(self, parent, label, var_name, section, config_key, options):
+       
+        initial_value = int(self.config_dict[section].get(config_key, 0))
+        var = tk.IntVar(self, value=initial_value)
+        setattr(self, var_name, var)
+        
+        for text, value in options:
+            rb = tk.Radiobutton(parent, text=text, variable=var, value=value,
+                                command=lambda: self.checkbox_to_dict(var_name, section, config_key))
+            rb.pack(anchor='w', padx=5, pady=2)
+
+
     def fill_options_tab(self):
         gen_frm = ttk.LabelFrame(self.options_tab, text='General Options')
         gen_frm.pack(fill='x', padx=10, pady=5)
@@ -188,7 +197,8 @@ class ConfigGUI(tk.Tk):
 
         cvr_frm = ttk.LabelFrame(self.options_tab, text='Climate Variability')
         cvr_frm.pack(fill='x', padx=10, pady=5)
-        self.add_checkbox(cvr_frm, 'Consider climate variability', 'cons_variability_var', 'climatevariability', 'consider_variability')
+        self.add_radiobuttons(cvr_frm, 'Consider climate variability:', 'cons_variability_var', 'climatevariability', 'consider_variability',\
+                              [('Without variability', 0), ('With variability', 1), ('With and without variability', 2)] )
 
         out_frm = ttk.LabelFrame(self.options_tab, text='Data Format')
         out_frm.pack(fill='x', padx=10, pady=5)
@@ -465,11 +475,93 @@ class ConfigGUI(tk.Tk):
         getattr(self, 'liming_slider').set(min([0, 1, 2, 3], key=lambda x: abs(x - float(value))))
         self.config_dict['options']['simulate_calcification'] = getattr(self, 'liming_slider').get()
 
+    def update_irrigation_main(self, value_string):
+        if all(c in '0' for c in value_string):
+            self.irrig_var.set(0)
+            self.irrig_checkbox.state(['!selected', '!alternate'])
+            self.config_dict['options']['irrigation'] = '0'
+        elif all(c in '1' for c in value_string):
+            self.irrig_var.set(1)
+            self.irrig_checkbox.state(['selected', '!alternate'])
+            self.config_dict['options']['irrigation'] = '1'
+        else:
+            self.irrig_var.set(-1)
+            self.irrig_checkbox.state(['alternate'])
+            self.config_dict['options']['irrigation'] = value_string
+
+    def create_monthly_irrigs(self, frame):
+        state_string = list('111111111111' if str(self.config_dict['options']['irrigation']).lower() in ['true', 't', '1'] else '000000000000')
+
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+        self.vars = []
+        string_display = tk.StringVar()
+        string_display.set("State: " + "".join(state_string))
+
+        def update_state_string():
+            for i in range(12):
+                state_string[i] = '1' if self.vars[i].get() else '0'
+            current = "".join(state_string)
+            string_display.set("State: " + "".join(state_string))
+            self.update_irrigation_main(current)
+
+        for i, month in enumerate(months):
+            var = tk.IntVar(frame, value=int(state_string[i]))
+            cb = ttk.Checkbutton(frame, text=month, variable=var, command=update_state_string, state='DISABLED')
+            cb.grid(row=i, column=0, sticky="w", padx=20, pady=2)
+            self.vars.append(var)
+
+        label = ttk.Label(frame, textvariable=string_display)
+        label.grid(row=13, column=0, pady=10)
+
+    def on_irrig_var_changed(self):
+        bool_val = self.irrig_var.get()
+        [var.set(bool_val) for var in self.vars]
+        state_string = list('000000000000')
+        for i, var in enumerate(self.vars):
+            state_string[i] = '1' if var.get() else '0'
+        current = "".join(state_string)
+        self.update_irrigation_main(current)
+
+    def create_irrigation(self, frame):
+        self.irrig_var = tk.IntVar(self)
+        irrigation_val = str(self.config_dict['options'].get('irrigation', 0)).lower()
+        ttk.Style().theme_use('clam')
+
+        cb_frame = tk.Frame(frame)
+        cb_frame.pack(fill='x')
+
+        self.irrig_checkbox = ttk.Checkbutton(cb_frame, text="Irrigation", variable=self.irrig_var, command=self.on_irrig_var_changed)
+        self.irrig_checkbox.pack(side='left', padx=5, pady=5)
+
+        if irrigation_val in ['y', 'yes', 'true', '1']:
+            irrigation_val = '1'
+        elif irrigation_val in ['n', 'no', 'false', '0']:
+            irrigation_val = '0'
+
+        if irrigation_val == '0':
+            self.irrig_var.set(0)
+            self.irrig_checkbox.state(['!selected', '!alternate'])
+        elif irrigation_val == '1':
+            self.irrig_var.set(1)
+            self.irrig_checkbox.state(['selected', '!alternate'])
+        else:
+            self.irrig_var.set(-1)
+            self.irrig_checkbox.state(['alternate'])
+
+        monthly_frame = tk.Frame(frame)
+        monthly_frame.pack(fill='x')
+
+        self.create_monthly_irrigs(monthly_frame)
+        #self.irrig_var.trace_add('write', self.on_irrig_var_changed)
+
     def fill_adapt_tab(self):
 
         irg_frm = ttk.LabelFrame(self.adapt_tab, text='Irrigation')
         irg_frm.pack(fill='x', padx=10, pady=5)
         self.add_checkbox(irg_frm, 'Irrigation', 'irrigation_var', 'options', 'irrigation')
+
+        #self.create_irrigation(irg_frm)
 
         lime_frm = ttk.LabelFrame(self.adapt_tab, text='Liming')
         lime_frm.pack(fill='x', padx=10, pady=5)
@@ -777,5 +869,5 @@ class ConfigGUI(tk.Tk):
 
 if __name__ == "__main__":
     #pass
-    ConfigGUI(os.path.join('U:\\Source Code\\CropSuite\\world.ini')).mainloop()
+    ConfigGUI(os.path.join('U:\\Source Code\\CropSuite\\config.ini')).mainloop()
     #app.mainloop()

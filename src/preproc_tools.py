@@ -8,38 +8,30 @@ except Exception as e:
 
 import numpy as np
 import xarray as xr
-#from datetime import datetime
 try:
     from src import data_tools as dt
     from src import read_climate_ini as rci
     from src import nc_tools as nc
     from src import read_plant_params as rpp
-    #from src import downscaling as downs
     from src import temp_interpolation as ti
     from src import prec_interpolation as pi
     import data_tools as dt
     import read_climate_ini as rci
     import nc_tools as nc
     import read_plant_params as rpp
-    #import downscaling as downs
     import temp_interpolation as ti
     import prec_interpolation as pi
 except:
     import data_tools as dt
     import read_climate_ini as rci
     import nc_tools as nc
-    
     import read_plant_params as rpp
-    #import downscaling as downs
     import temp_interpolation as ti
     import prec_interpolation as pi
-from scipy.integrate import cumulative_trapezoid
-#from scipy.interpolate import RegularGridInterpolator
 from concurrent.futures import ProcessPoolExecutor
 import math
-import netCDF4 as nc4
 from skimage import transform as skt
-from datetime import datetime
+import shutil
 
 def get_time_range(nc_files):
     min_time = None
@@ -105,13 +97,18 @@ def calculate_daily_prec_sum(prec_files, out_file, start_year, end_year, extent 
     ds_list = [xr.open_dataset(nc) for nc in prec_files]
     new_ds = []
     for ds in ds_list:
+        lat_var = 'lat' if 'lat' in list(ds.variables) else 'latitude'
+        lon_var = 'lon' if 'lon' in list(ds.variables) else 'longitude'
         if extent == [0, 0, 0, 0]:
             ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'))
         else:
-            lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds.lat[0] > ds.lat[-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
-            lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds.lon[0] < ds.lon[-1] else slice(float(extent.get('right')), float(extent.get('left')))
-            ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), lat=lat_slc, lon=lon_slc)
-        if ds.dims['time'] > 0 and ds.dims['lat'] > 0 and ds.dims['lon'] > 0:
+            lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds[lat_var][0] > ds[lat_var][-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
+            lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds[lon_var][0] < ds[lon_var][-1] else slice(float(extent.get('right')), float(extent.get('left')))
+            #lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds.lat[0] > ds.lat[-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
+            #lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds.lon[0] < ds.lon[-1] else slice(float(extent.get('right')), float(extent.get('left')))
+            #ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), lat_var=lat_slc, lon_var=lon_slc)
+            ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), **{lat_var: lat_slc, lon_var: lon_slc}) #type:ignore
+        if ds.dims['time'] > 0 and ds.dims[lat_var] > 0 and ds.dims[lon_var] > 0:
             new_ds.append(ds)
     print('    -> Selecting and concatenating required data')
     ds = new_ds[0] if len(new_ds) == 1 else xr.concat(new_ds, dim='time')
@@ -152,11 +149,19 @@ def calculate_daily_prec_sum(prec_files, out_file, start_year, end_year, extent 
 
     print('    -> Writing new NetCDF file')
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
+
+    if lat_var == 'latitude':
+        ds = ds.rename({'latitude': 'lat'})
+    if lon_var == 'longitude':
+        ds = ds.rename({'longitude': 'lon'})
+
     ds.to_netcdf(out_file, encoding=encoding)
     print('')
 
-def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█'):
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█' if os.name != 'nt' else '#'):
     percent = f"{100 * (iteration / float(total)):.{decimals}f}"
+    max_len, _ = shutil.get_terminal_size(fallback=(80, 24))
+    length = np.min([length, int(max_len) - len(prefix) - 8 - len(suffix)])
     filled_length = int(length * iteration // total)
     bar = fill * filled_length + '-' * (length - filled_length)
     print(f'\r{prefix} |{bar}| {percent}% {suffix}', end='\r')
@@ -203,6 +208,8 @@ def parallel_processing(current_data, extent, worldclim_factors, fine_resolution
                         process_slice(task)     
                 else:              
                     try:
+                        #for task in month_tasks:
+                        #    process_slice(task)
                         with ProcessPoolExecutor(max_workers=max_proc) as executor:
                             executor.map(process_slice, month_tasks, chunksize=int(math.ceil(len(month_tasks) / max_proc)))
                     except:
@@ -238,13 +245,25 @@ def get_nc_data(file_list, start_year, end_year, extent = [0, 0, 0, 0], downscal
 
     new_ds = []
     for ds in ds_list:
+        lat_var = 'lat' if 'lat' in list(ds.variables) else 'latitude'
+        lon_var = 'lon' if 'lon' in list(ds.variables) else 'longitude'
+        if lat_var == 'latitude':
+            ds = ds.rename({'latitude': 'lat'})
+        if lon_var == 'longitude':
+            ds = ds.rename({'longitude': 'lon'})
+        lat_var, lon_var = 'lat', 'lon'
         if extent == [0, 0, 0, 0]:
             ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'))
         else:
-            lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds.lat[0] > ds.lat[-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
-            lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds.lon[0] < ds.lon[-1] else slice(float(extent.get('right')), float(extent.get('left')))
-            ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), lat=lat_slc, lon=lon_slc)
-        if ds.dims['time'] > 0 and ds.dims['lat'] > 0 and ds.dims['lon'] > 0:
+
+            lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds[lat_var][0] > ds[lat_var][-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
+            lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds[lon_var][0] < ds[lon_var][-1] else slice(float(extent.get('right')), float(extent.get('left')))
+            ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), **{lat_var: lat_slc, lon_var: lon_slc}) #type:ignore
+
+            #lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds.lat[0] > ds.lat[-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
+            #lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds.lon[0] < ds.lon[-1] else slice(float(extent.get('right')), float(extent.get('left')))
+            #ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), lat=lat_slc, lon=lon_slc)
+        if ds.dims['time'] > 0 and ds.dims[lat_var] > 0 and ds.dims[lon_var] > 0:
             new_ds.append(ds)
     print('    -> Selecting and concatenating required data')
     ds = new_ds[0] if len(new_ds) == 1 else xr.concat(new_ds, dim='time')
@@ -268,8 +287,10 @@ def get_nc_data(file_list, start_year, end_year, extent = [0, 0, 0, 0], downscal
         no_years = int(np.round(total_days / 365))
         
         if mode == 'temp':
+            if len([f for f in os.listdir(output_dir) if f.startswith('ds_temp_') and f.endswith('.nc')]) == total_days:
+                return [os.path.join(output_dir, f'ds_temp_{day}.nc') for day in range(len(os.listdir(output_dir)))]
             print('    -> Downscaling temperature data')
-            dtshape = ds[varname].values[1].shape
+            dtshape = ds[varname].shape[1:]
             world_clim_dir = config['files'].get('worldclim_temperature_data_dir')
             ext = nc.check_extent_load_file(os.path.join(world_clim_dir, f'factors_month_1.nc'), extent=extent)
             if not ext:
@@ -282,9 +303,11 @@ def get_nc_data(file_list, start_year, end_year, extent = [0, 0, 0, 0], downscal
                 print_progress_bar(year, no_years, prefix='       Progress', suffix='Complete', length=50)            
             return [os.path.join(output_dir, f'ds_temp_{day}.nc') for day in range(len(os.listdir(output_dir)))]
         else:
+            if len([f for f in os.listdir(output_dir) if f.startswith('ds_prec_') and f.endswith('.nc')]) == total_days:
+                return [os.path.join(output_dir, f'ds_prec_{day}.nc') for day in range(len(os.listdir(output_dir)))]
             print('    -> Downscaling precipitation data')
             world_clim_dir = config['files'].get('worldclim_precipitation_data_dir')
-            dtshape =  ds[varname].values[1].shape
+            dtshape =  ds[varname].shape[1:]
             ext = nc.check_extent_load_file(os.path.join(world_clim_dir, f'factors_month_1.nc'), extent=extent)
             if not ext:
                 [os.remove(file) for i in range(1, 13) if (file := os.path.join(world_clim_dir, f'factors_month_{i}.nc')) and os.path.exists(file)]
@@ -400,7 +423,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
             growing_cycle -= int(crop_dict.get('days_to_vernalization')[0]) #type:ignore
 
         # Consider additional Parameters:
-        if int(crop_dict.get('consider_in_preproc', '0')[0]) == 1: #type:ignore
+        if int(crop_dict.get('consider_in_preproc', '0')[0]) in [1, 2]: #type:ignore
             additional_conditions = [cond for i in range(100) if (cond := crop_dict.get(f'AddCon:{i}')) is not None] #type:ignore
         else:
             additional_conditions = []
@@ -420,7 +443,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
 
         if growing_cycle >= 364:
             t_lower, t_upper = np.zeros(shp, dtype=np.int8), np.zeros(shp, dtype=np.int8)
-            print('n    -> Calculation of limit value exceedances')
+            print('\n    -> Calculation of limit value exceedances')
             for timeslice in range(timerange):
                 if downscaling:
                     temp_data = nc.read_area_from_netcdf_list(filepaths[timeslice*growing_cycle:(timeslice+1)*growing_cycle], extent=extent, dayslices=True, transp=False)
@@ -490,7 +513,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
             shp = nc.get_netcdf_shape(filepaths[0])[nc.get_variable_name_from_nc(filepaths[0])]
         if growing_cycle >= 364:
             p_lower, p_upper = np.zeros(shp, dtype=np.int8), np.zeros(shp, dtype=np.int8)
-            print('    -> Calculation of limit value exceedances')
+            print('\n    -> Calculation of limit value exceedances')
             for timeslice in range(timerange):
                 if downscaling:
                     prec_data = nc.read_area_from_netcdf_list(filepaths[timeslice*growing_cycle:(timeslice+1)*growing_cycle], extent=extent, dayslices=True, transp=False)
@@ -517,7 +540,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
             p_upper = ((p_upper / timerange) * 100).astype(np.int8)
         else:
             p_lower, p_upper = np.zeros((365, *shp), dtype=np.int8), np.zeros((365, *shp), dtype=np.int8)
-            print('    -> Calculation of limit value exceedances')
+            print('\n    -> Calculation of limit value exceedances')
             for year in range(timerange):
                 if downscaling:
                     prec_data = nc.read_area_from_netcdf_list(filepaths[year*365:((year+1)*365)+growing_cycle], extent=extent, dayslices=True, transp=False)

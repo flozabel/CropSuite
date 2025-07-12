@@ -527,11 +527,6 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
 
         nan_mask = layers[0] == nodata
         mean = np.nanmean(layers, axis=0)
-        # mean[nan_mask] = nodata
-        # if mean.shape != final_shape:
-        #     nan_mask = dt.interpolate_nanmask(nan_mask, final_shape)
-        #     mean, nodata = resize_array_interp(mean, final_shape, nodata=nodata, method='nearest')
-
         new_file = mean / conversion_factor
         new_file[nan_mask] = nodata  #type:ignore
         return new_file, nodata
@@ -542,11 +537,6 @@ def aggregate_soil_raster_lst(file_list, domain, final_shape, weighting_method =
             layer, nodata = dt.load_specified_lines(layer_file, [domain[1], domain[0], domain[3], domain[2]], all_bands=False)
             layer, nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
             layers.append(layer)
-
-        #for idx, layer in enumerate(layers):
-        #    if layer.shape != final_shape:
-        #        layers[idx], nodata = resize_array_interp(layer, final_shape, nodata=nodata, method='nearest')
-
         nan_mask = layers[0] == nodata
 
         new_file = np.zeros((layers[0].shape))
@@ -757,14 +747,14 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
         top, left, bottom, right = extent
         height, width = ph_add.shape
         transform = from_bounds(left, bottom, right, top, width, height)
-        with rasterio.open(os.path.join(results_path, 'ph_increase.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.int8,
+        with rasterio.open(os.path.join(results_path, 'ph_increase.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
                             crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
-            dst.write((ph_add * 10.).astype(np.int8), 1)
+            dst.write((ph_add.astype(np.float32)).astype(np.int8), 1)
 
         ph_write = parameter_array[..., ph_index].copy()
         ph_write[ph_write <= 0] = -.1
-        ph_write = (ph_write * 10).astype(np.int8)
-        with rasterio.open(os.path.join(results_path, 'ph_after_liming.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.int8,
+        ph_write = ph_write.astype(np.float32)
+        with rasterio.open(os.path.join(results_path, 'ph_after_liming.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
                             crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
             dst.write(ph_write, 1)
         del ph_write

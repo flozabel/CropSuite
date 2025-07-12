@@ -91,54 +91,96 @@ def get_netcdf_over_time_range(netcdf_files, start_year, end_year, tp='mean'):
         data = []
     return data
 
-def read_geotiff(filepath, resolution, resolution_mode=50):
-    if resolution_mode == 0:
+def read_geotiff(filepath, resolution, resolution_mode=50, day=-1):
+    if day < 0:
         with rasterio.open(filepath, 'r') as dataset:
-            data = dataset.read(1)
+            width = dataset.width
+            height = dataset.height
             nodata = dataset.nodata
             bounds = dataset.bounds
-    elif resolution_mode == 25:
-        with rasterio.open(filepath, 'r') as dataset:
-            factor = np.min([int(4), int(dataset.width / (resolution * 4))])
-            if factor < 1:
+
+            if resolution_mode == 0:
                 data = dataset.read(1)
             else:
-                data = dataset.read(1, out_shape=(1, dataset.height // factor, dataset.width // factor))
-            nodata = dataset.nodata
-            bounds = dataset.bounds
-    elif resolution_mode == 50:
-        with rasterio.open(filepath, 'r') as dataset:
-            factor = int(dataset.width / resolution)
-            if factor < 1:
-                data = dataset.read(1)
-            else:
-                data = dataset.read(1, out_shape=(1, dataset.height // factor, dataset.width // factor))
-            nodata = dataset.nodata
-            bounds = dataset.bounds
-    elif resolution_mode == 75:
-        with rasterio.open(filepath, 'r') as dataset:
-            factor = int(dataset.width / (resolution / 2))
-            if factor < 1:
-                data = dataset.read(1)
-            else:
-                data = dataset.read(1, out_shape=(1, dataset.height // factor, dataset.width // factor))
-            nodata = dataset.nodata
-            bounds = dataset.bounds
+                if resolution_mode == 25:
+                    factor = min(4, width // (resolution * 4))
+                elif resolution_mode == 50:
+                    factor = width // resolution
+                elif resolution_mode == 75:
+                    factor = width // (resolution // 2)
+                else:
+                    factor = width // 256
+
+                if factor < 1:
+                    data = dataset.read(1)
+                else:
+                    data = dataset.read(1, out_shape=(1, height // factor, width // factor))
     else:
         with rasterio.open(filepath, 'r') as dataset:
-            factor = int(dataset.width / 256)
-            if factor < 1:
-                data = dataset.read(1)
-            else:
-                data = dataset.read(1, out_shape=(1, dataset.height // factor, dataset.width // factor))
+            width = dataset.width
+            height = dataset.height
             nodata = dataset.nodata
             bounds = dataset.bounds
+
+            if resolution_mode == 0:
+                data = dataset.read()
+            else:
+                if resolution_mode == 25:
+                    factor = min(4, width // (resolution * 4))
+                elif resolution_mode == 50:
+                    factor = width // resolution
+                elif resolution_mode == 75:
+                    factor = width // (resolution // 2)
+                else:
+                    factor = width // 256
+
+                if factor < 1:
+                    data = dataset.read()
+                else:
+                    data = dataset.read(out_shape=(dataset.bounds, height // factor, width // factor))
+        data = data[..., day]
     del dataset
     data = data.astype(np.float16)
     data[data == nodata] = np.nan
     print(f' -> Data loaded with shape {data.shape} and nodata value {nodata}')
     return data, bounds
 
+def read_geotiff_mean(filepath, resolution, resolution_mode=50):
+    with rasterio.open(filepath, 'r') as dataset:
+        width = dataset.width
+        height = dataset.height
+        nodata = dataset.nodata
+        bounds = dataset.bounds
+
+        if resolution_mode == 0:
+            data = dataset.read()
+        else:
+            if resolution_mode == 25:
+                factor = min(4, width // (resolution * 4))
+            elif resolution_mode == 50:
+                factor = width // resolution
+            elif resolution_mode == 75:
+                factor = width // (resolution // 2)
+            else:
+                factor = width // 256
+
+            if factor < 1:
+                data = dataset.read()
+            else:
+                data = dataset.read(out_shape=(dataset.bounds, height // factor, width // factor))
+        data = np.nanmean(data, axis=(0, 1))
+    del dataset
+    data = data.astype(np.float16)
+    data[data == nodata] = np.nan
+    print(f' -> Data loaded with shape {data.shape} and nodata value {nodata}')
+    return data, bounds
+
+def get_layers(filepath):
+    with rasterio.open(filepath) as src:
+        if src.count > 1:
+            return src.shape[1]
+        return 1
+    
 def get_limiting_factors(filename):
     filename = os.path.join(os.path.dirname(filename), 'limiting_factor.inf')
     if os.path.exists(filename):
@@ -228,7 +270,8 @@ class ColormapGetter:
                             'gray_r': 'gray_r', 'hot_r': 'hot_r', 'hsv_r': 'hsv_r', 'jet_r': 'jet_r', 'nipy_spectral_r': 'nipy_spectral_r', 'ocean_r': 'ocean_r', 'pink_r': 'pink_r',
                             'prism_r': 'prism_r', 'rainbow_r': 'rainbow_r', 'seismic_r': 'seismic_r', 'spring_r': 'spring_r', 'summer_r': 'summer_r', 'terrain_r': 'terrain_r',
                             'winter_r': 'winter_r', 'Accent_r': 'Accent_r', 'Dark2_r': 'Dark2_r', 'Paired_r': 'Paired_r', 'Pastel1_r': 'Pastel1_r', 'Pastel2_r': 'Pastel2_r', 'Set1_r': 'Set1_r',
-                            'Set2_r': 'Set2_r', 'Set3_r': 'Set3_r', 'tab10_r': 'tab10_r', 'tab20_r': 'tab20_r', 'tab20b_r': 'tab20b_r', 'tab20c_r': 'tab20c_r'}
+                            'Set2_r': 'Set2_r', 'Set3_r': 'Set3_r', 'tab10_r': 'tab10_r', 'tab20_r': 'tab20_r', 'tab20b_r': 'tab20b_r', 'tab20c_r': 'tab20c_r',
+                            'rrpcf': ['darkgreen', 'yellow', 'orange', 'darkred', 'darkred', 'darkred', 'darkred', 'darkred']}
     
     def get_colormap(self, name):
         if name in self.colormap_list:
@@ -238,3 +281,6 @@ class ColormapGetter:
         
     def get_all_colormaps(self):
         return list(self.colormap_list.keys())
+    
+    def get_colormap_index(self, name):
+        print(list(self.colormap_list.keys()).index(name))

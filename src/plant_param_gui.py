@@ -531,9 +531,15 @@ class plant_param_gui(tk.Frame):
         self.addcon_root.resizable(0, 0) #type:ignore
         self.addcon_root.focus_force()
 
-        self.cons_preproc_var = IntVar(self.addcon_root, int(self.crop_dict.get('consider_in_preproc', 0) in [1, 'y']))
-        cons_preproc_cb = Checkbutton(self.addcon_root, text='Consider in Preprocessing', variable=self.cons_preproc_var)
+        options = ["only climate suitability", "only climate variability", "climate variability and climate suitability"]
+        self.cons_preproc_var = StringVar(self.addcon_root, options[int(self.crop_dict.get('consider_in_preproc', options[0]))])
+        cons_preproc_cb = ttk.Combobox(self.addcon_root, textvariable=self.cons_preproc_var, values=options, state="readonly", width=50)
         cons_preproc_cb.pack(anchor='w', padx=5, pady=5)
+
+
+        #self.cons_preproc_var = IntVar(self.addcon_root, int(self.crop_dict.get('consider_in_preproc', 0) in [1, 'y']))
+        #cons_preproc_cb = Checkbutton(self.addcon_root, text='Consider in Preprocessing', variable=self.cons_preproc_var)
+        #cons_preproc_cb.pack(anchor='w', padx=5, pady=5)
 
         main_frame = tk.Frame(self.addcon_root)
         main_frame.pack(fill=tk.BOTH, expand=1, padx=5, pady=5)
@@ -806,8 +812,10 @@ class plant_param_gui(tk.Frame):
                 else:
                     value_str = str(value)
                 write_file.write(f'{key} = \t\t{value_str}\n')
-            if hasattr(self, 'cons_preproc_var') and self.cons_preproc_var.get() == 1:
-                write_file.write(f'consider_in_preproc = \t\t{self.cons_preproc_var.get()}\n')
+            if hasattr(self, 'cons_preproc_var'):
+                options = ["only climate suitability", "only climate variability", "climate variability and climate suitability"]
+                val = options.index(self.cons_preproc_var.get())
+                write_file.write(f'consider_in_preproc = \t\t{val}\n')
         # self.root.destroy()
 
     def add_memship(self):

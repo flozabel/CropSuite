@@ -62,13 +62,15 @@ def merge_outputs_no_overlap(results_path, config):
     filenames = ['crop_limiting_factor.tif', 'crop_suitability.tif', 'multiple_cropping.tif', 'optimal_sowing_date.tif', 'suitable_sowing_days.tif', 
                  'climate_suitability.tif', 'multiple_cropping_sum.tif', 'optimal_sowing_date_mc_first.tif', 'optimal_sowing_date_mc_second.tif', 
                  'optimal_sowing_date_mc_third.tif', 'climate_suitability_mc.tif', 'all_suitability_vals.tif', 'optimal_sowing_date_vernalization.tif',
-                 'soil_suitability.tif', 'cr_temp.tif', 'start_growing_cycle_after_vernalization.tif', 'optimal_sowing_date_with_vernalization.tif']
+                 'soil_suitability.tif', 'start_growing_cycle_after_vernalization.tif', 'optimal_sowing_date_with_vernalization.tif',
+                 'optimal_sowing_date_rrpcf.tif', 'optimal_sowing_date_mc_first_rrpcf.tif', 'optimal_sowing_date_mc_second_rrpcf.tif',
+                 'optimal_sowing_date_mc_third_rrpcf.tif']
     areas = [d for d in next(os.walk(results_path))[1] if d.startswith('Area_')]
     print(' -> Found Areas: ')
     for area in areas:
         print(f'    * {area}')
 
-    north_values = [int(value[:-1]) for item in areas for value in re.findall(r'(-?\d+N)', item)]
+    north_values = [int(a or b) for item in areas for a, b in re.findall(r'(?<=_|-)(-?\d+)N|^(-?\d+)N', item)]
     east_values = [int(value[:-1]) for item in areas for value in re.findall(r'(-?\d+E)', item)]
     merged_result = os.path.join(results_path, f'Area_{max(north_values)}N{min(east_values)}E-{min(north_values)}N{max(east_values)}E')
     if os.path.isdir(merged_result):

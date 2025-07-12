@@ -13,6 +13,8 @@ except Exception as e:
 from tkinter import * #type:ignore
 from tkinter import filedialog
 from tkinter import ttk
+from tkinter import Canvas
+from tkinter import Tk
 import tkinter as tk
 from CropSuite import run
 import os
@@ -45,10 +47,11 @@ import warnings
 import xarray as xr
 from src import plant_param_gui
 from src import config_gui as cfg
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
-version = '1.3.4'
-date = '2025-05-08'
+version = '1.4.5'
+date = '2025-07-12'
 current_cfg = ''
 
 plant_param_dir = ''
@@ -73,7 +76,7 @@ def get_screen_resolution():
     results = str(subprocess.Popen(['system_profiler SPDisplaysDataType'],stdout=subprocess.PIPE, shell=True).communicate()[0])
     res = re.search(r'Resolution: \d* x \d*', results).group(0).split(' ') #type:ignore
     return int(res[1]), int(res[3])
-    
+
 class CropSuiteGui:
     global config_ini_val
     def __init__(self, config_ini=''):
@@ -103,10 +106,8 @@ class CropSuiteGui:
         self.image_unibas = PhotoImage(file=os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'unibas.png')), master=self.window)
         self.setup_ui(config_ini)
 
-
     def setup_ui(self, config_path):
         # UI setup
-        
         Label(self.window, text='CropSuite\n', font=self.font18 + ' bold').pack()
         Label(self.window, text=f'Version {version}').pack()
         Label(self.window, text=date+'\n').pack()
@@ -184,10 +185,10 @@ class CropSuiteGui:
         self.but_frame.pack(anchor='w', fill='x', expand=True)
 
         self.restart = Button(self.window, text='Restart', command=self.restart, font=self.font16 + ' bold', highlightbackground='white') #type:ignore
-        self.restart.pack(side='left', fill=X, expand=True)
+        self.restart.pack(side='left', fill=X, expand=True) #type:ignore
 
         self.viewer = Button(self.window, text='Data Viewer', command=self.viewer, font=self.font16 + ' bold', highlightbackground='white') #type:ignore
-        self.viewer.pack(side='left', fill=X, expand=True)
+        self.viewer.pack(side='left', fill=X, expand=True) #type:ignore
 
         self.but_exit = Button(self.window, text='EXIT', command=self.exit_all, font=self.font16 + ' bold', highlightbackground='white')
         self.but_exit.pack(side='left', fill=X, expand=True)
@@ -298,7 +299,6 @@ class CropSuiteGui:
         self.clim_suit.config(text=text, fg=fg)
         self.window.update()
 
-
     def set_cropsuit(self, completed=False, no=0, out_of=0, started=False):
         oof = f'- {no} out of {out_of}'
         prog_text = '' if not started else ' in Progress'
@@ -337,7 +337,7 @@ class CropSuiteGui:
         self.window.update()
         return True
 
-def loading_gui():
+def loading_gui(version_number):
     loading_window = Tk()
     loading_window.focus_force()
     loading_window.title("CropSuite")
@@ -349,7 +349,13 @@ def loading_gui():
     splash_image = Image.open(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'splashscreen.png')))
     splash_image = splash_image.resize((500, 500))
     splash_image = ImageTk.PhotoImage(splash_image)
-    Label(loading_window, image=splash_image).pack() #type:ignore
+
+    canvas = Canvas(loading_window, width=500, height=500, bg='#87a600', highlightthickness=0)
+    canvas.pack()
+    canvas.create_image(0, 0, image=splash_image, anchor='nw')
+    canvas.create_text(250, 380, text=f"Version {version_number}", font=("Helvetica", 12, "bold"), fill="black")
+
+
     os.makedirs(os.path.abspath(os.path.join(os.path.dirname(__file__), 'plant_params')), exist_ok=True)
     os.makedirs(os.path.abspath(os.path.join(os.path.dirname(__file__), 'results')), exist_ok=True)
     os.makedirs(os.path.abspath(os.path.join(os.path.dirname(__file__), 'temp')), exist_ok=True)
@@ -1565,7 +1571,7 @@ def viewer_gui(config):
 def open_viewer_beta(config):
     curr_dct = rci.read_ini_file(config)
     results_path = os.path.dirname(curr_dct['files'].get('output_dir', os.getcwd()))
-    view = viewer.ViewerGUI(results_path)
+    view = viewer.ViewerGUI(results_path, config, viewer_gui)
     view.mainloop()
 
 def main_gui():
@@ -1598,9 +1604,19 @@ def main_gui():
     # Head
     header_image = Image.open(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src', 'header.png')))
     header_image = header_image.resize((600, 218))
-    header_image = ImageTk.PhotoImage(header_image)
-    head_lab = Label(main_window, image=header_image, relief='flat') #type:ignore
-    head_lab.pack()
+    header_image_tk = ImageTk.PhotoImage(header_image, master=main_window)
+
+    canvas = Canvas(main_window, width=600, height=218, highlightthickness=0)
+    canvas.pack()
+    canvas.create_image(0, 0, anchor='nw', image=header_image_tk)
+    canvas.create_text(80, 105, text=f"Version {version}", font=("Helvtica", 16, "bold"), fill="#181818")
+    canvas.create_text(79, 130, text=datetime.strptime(date, '%Y-%m-%d').strftime('%B %d, %Y'), font=("Helvtica", 16), fill="#181818")
+    canvas.create_text(139, 180, text=f'© 2023-{datetime.strptime(date, "%Y-%m-%d").strftime("%Y")} Matthias Knüttel & Florian Zabel',
+                       font=("Helvtica", 9, "bold"), fill="#181818")
+    canvas.image = header_image_tk #type:ignore
+
+    #head_lab = Label(main_window, image=header_image, relief='flat') #type:ignore
+    #head_lab.pack()
     
     def open_viewer(config):
         viewer_gui(config)
@@ -1760,16 +1776,12 @@ def main_gui():
             checked = cp.check_config_file(config_dict, gui=True)
             if checked:
                 check_cfg.config(text='  ☑  Config File is valid', fg=green)
-                viewer_button.config(state='normal')
                 viewer_beta_button.config(state='normal')
-                #preproc_button.config(state='normal')
                 edit_cfg.config(state='normal')
                 main_window.update()
             else:
                 check_cfg.config(text='  ✗  Config file is faulty', fg=red)
-                viewer_button.config(state='disabled')
                 viewer_beta_button.config(state='disabled')
-                #preproc_button.config(state='disabled')
                 edit_cfg.config(state='disabled')
                 main_window.update()
 
@@ -1784,10 +1796,7 @@ def main_gui():
     manual_button = Button(frm, text=' Open Manual', command=open_manual, compound='left')
     manual_button.pack(side='right', padx=5, pady=5)
 
-    viewer_button = Button(frm, text=' Open Data Viewer', compound='left', command=lambda: open_viewer(config_ini_var.get()))
-    viewer_button.pack(side='right', padx=5, pady=5)
-
-    viewer_beta_button = Button(frm, text='Open Data Viewer (Beta)', compound='left', command=lambda: open_viewer_beta(config_ini_var.get()))
+    viewer_beta_button = Button(frm, text='Open Data Viewer', compound='left', command=lambda: open_viewer_beta(config_ini_var.get()))
     viewer_beta_button.pack(side='right', padx=5, pady=5)
 
     Label(main_window, text='', font=font10 + ' bold').pack()
@@ -1834,15 +1843,12 @@ def main_gui():
         checked = False
     if checked:
         check_cfg.config(text='  ☑  Config File is valid', fg=green)
-        viewer_button.config(state='normal')
         viewer_beta_button.config(state='normal')
         #preproc_button.config(state='normal')
         main_window.update()
     else:
         check_cfg.config(text='  ✗  Config file is faulty', fg=red)
-        viewer_button.config(state='disabled')
         viewer_beta_button.config(state='disabled')
-        #preproc_button.config(state='disabled')
         main_window.update()
     main_window.update()
 
@@ -1857,15 +1863,11 @@ def main_gui():
 
     if checked:
         edit_cfg = Button(main_window, text='Options', compound='left', command=config_gui_button)
-        viewer_button.config(state='normal')
         viewer_beta_button.config(state='normal')
-        #preproc_button.config(state='normal')
         main_window.update()
     else:
         edit_cfg = Button(main_window, text='Options', compound='left', command=config_gui_button, state='disabled')
-        viewer_button.config(state='disabled')
         viewer_beta_button.config(state='disabled')
-        #preproc_button.config(state='disabled')
         main_window.update()
     edit_cfg.pack(pady=5)
 
@@ -1891,15 +1893,11 @@ def main_gui():
             if checked:
                 check_cfg.config(text='  ☑  Config File is valid', fg=green)
                 edit_cfg.config(state='normal')
-                viewer_button.config(state='normal')
                 viewer_beta_button.config(state='normal')
-                #preproc_button.config(state='normal')
             else:
                 check_cfg.config(text='  ✗  Config file is faulty', fg=red)
                 edit_cfg.config(state='disabled')
-                viewer_button.config(state='disabled')
                 viewer_beta_button.config(state='disabled')
-                #preproc_button.config(state='disabled')
             main_window.update()
 
     def open_plant_gui():
@@ -1924,19 +1922,10 @@ def main_gui():
     sel_but.pack(side='left', padx=10)
     Label(main_window, text='').pack()
 
-    #Frame(main_window, bd=5, relief='sunken', height=2).pack(side='top', fill='x')
-    #Label(main_window, text='', font=font10 + ' bold').pack()
-
-    #Label(main_window, text='3 - Parameter Dataset Selection').pack(pady=5, padx=5, anchor='w')
-    #set_but = Button(main_window, text=' Select Parameter Datasets', compound='left', command=lambda: param_gui(config_ini_var.get()))
-    #set_but.pack()
-    #Label(main_window, text='', font=font10 + ' bold').pack()
-
     def start(ini_path):
         main_window.destroy()
         start_secproc(ini_path)
 
-    #Frame(main_window, bd=5, relief='sunken', height=2).pack(side='top', fill='x')
     bottom_frame = Frame(main_window).pack(fill=X)
     Button(bottom_frame, text='START', command=lambda: start(get_config()), font=font16 + ' bold').pack(side='left', fill=X, expand=True)
     Button(bottom_frame, text='EXIT', command=exit_all, font=font16 + ' bold').pack(side='left', fill=X, expand=True)
@@ -2231,7 +2220,7 @@ def plant_gui(config_ini):
     listbox.bind("<Button-3>", on_right_click)
     listbox.bind("<Button-2>", on_right_click)
     listbox.bind("<Control-Button-1>", on_right_click)
-
+    
     select_all_button = Button(plant_window, text="Select All", command=select_all)
     select_all_button.pack(side="left", padx=5)
     deselect_all_button = Button(plant_window, text="Deselect All", command=deselect_all)
@@ -2256,4 +2245,4 @@ if __name__ == '__main__':
     print('Running CropSuite')
     print('Loading...')
     if cv.check_versions():
-        loading_gui()
+        loading_gui(version_number=version)

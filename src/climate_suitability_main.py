@@ -12,6 +12,7 @@ from numba import jit
 from gc import collect
 import math
 import nc_tools as nc
+import re
 
     
 def get_suitability_val_dict(forms, plant, form_type, value):
@@ -77,32 +78,9 @@ def calculate_average_sunshine(array_shape, lat_bounds, start_day, end_day):
 
 
 def process_day_climsuit_memopt(args):
-    """
-    Processes climate suitability data for a specific day and saves the results to a GeoTIFF file.
-
-    Parameters:
-    - args (tuple): Tuple containing the following elements:
-    - day (int): Current day for processing climate data.
-    - growing_cycle (int): Duration of the growing cycle.
-    - climatedata (np.ndarray): Climate data array containing temperature and precipitation information.
-    - plant_params_forumlas (dict): Dictionary containing plant formulas for temperature, precipitation, and failure frequency.
-    - plant_list (list): List of plant names.
-    - plant (str): Name of the plant for which suitability data is processed.
-    - winter_crops (bool): winter crop
-    - temp_mask (np.ndarray): Mask for temperature data.
-    - irrigation (int): Flag indicating whether irrigation is applied (0 for no irrigation, 1 for irrigation).
-    - crop_failures (np.ndarray): Array indicating frequency of crop failures.
-    - vernalization_params: [vernalization_period, vernalization_tmax, vernalization_tmin, frost_resistance, frost_resistance_period, time_to_vernalization]
-    Returns:
-    - None
-
-    Note: This function processes climate suitability data for a specific day, calculates suitability values based on
-        specified formulas, and saves the results to a GeoTIFF file. It also handles memory optimization during processing.
-    """
     day, growing_cycle, temperature, precipitation, plant_params_forumlas, plant, wintercrop, water_mask, irrigation,\
         crop_failures, vernalization_params, lethal, lethal_params, sowprec_params, photoperiod, photoperiod_params,\
             max_consec_dry_days, dry_day_prec, dursowing, sowingtemp, max_prec_val, max_prec_dur, additional_conditions = args
-    # vern_period is the time period, for which the vernalization requirements of the effective vernalization days are searched
     vern_period = 150
     temp_path = os.path.join(os.getcwd(), 'temp', f'{day}.tif')
 
@@ -115,26 +93,6 @@ def process_day_climsuit_memopt(args):
     sys.stdout.flush()
 
     if wintercrop:
-        """
-        start_of_vernalization = day - vern_period
-        if start_of_vernalization < 0:
-            window_temp_vern = np.concatenate((temperature[..., start_of_vernalization:], temperature[..., :day]), axis=2)
-        else:
-            window_temp_vern = temperature[..., start_of_vernalization:day]
-
-        # Vernalization temperature thresholds
-        vernalization_min_temp, vernalization_max_temp = vernalization_params[2] * 10, vernalization_params[1] * 10
-        cumulative_conditions = np.cumsum((window_temp_vern <= vernalization_max_temp) & (window_temp_vern >= vernalization_min_temp), axis=2)
-
-        # Find the optimal start date where cumulative_conditions first reaches vernalization requiremets
-        opt_start_date = np.full(cumulative_conditions.shape[:-1], -1, dtype=np.int16)
-        first_50_days = np.argmax(cumulative_conditions == vernalization_params[0], axis=2).astype(np.uint8)
-
-        # Correct opt_start_date only where 50 days are met
-        opt_start_date[np.any(cumulative_conditions >= vernalization_params[0], axis=2)] = vern_period - first_50_days[np.any(cumulative_conditions >= vernalization_params[0], axis=2)]
-        del first_50_days, cumulative_conditions
-        """
-
         start_of_vernalization = day - vern_period
         if start_of_vernalization < 0:
             window_temp_vern = np.concatenate((temperature[..., start_of_vernalization:], temperature[..., :day]), axis=2)
@@ -178,32 +136,9 @@ def process_day_climsuit_memopt(args):
         temp_to_vern = np.full((temperature.shape[0], temperature.shape[1], days_to_vern), np.nan, dtype=np.float16)
         prec_to_vern = np.full((precipitation.shape[0], precipitation.shape[1], days_to_vern), 0, dtype=np.int16)
 
-        """
-        # Vectorized approach
         vern_start = opt_start_date[..., None]
         start_indices = (vern_start - days_to_vern) % 365
 
-        # Create a full year array to handle wrap-around using concatenation
-        temperature_full = np.concatenate((temperature, temperature), axis=2)
-        precipitation_full = np.concatenate((precipitation, precipitation), axis=2)
-
-        # Calculate indices for vectorized extraction
-        rows, cols = np.indices((temperature.shape[0], temperature.shape[1]))
-        rows = rows[..., None]
-        cols = cols[..., None]
-        start_indices_full = (start_indices + 365) % 365
-        range_indices = np.arange(days_to_vern)
-
-        # Extract temperature and precipitation data
-        temp_to_vern = temperature_full[rows, cols, start_indices_full + range_indices]
-        prec_to_vern = precipitation_full[rows, cols, start_indices_full + range_indices]
-        """
-
-        # Vectorized approach without duplicating arrays
-        vern_start = opt_start_date[..., None]
-        start_indices = (vern_start - days_to_vern) % 365
-
-        # Calculate rows, cols, and range_indices once, without creating full arrays
         rows, cols = np.indices((temperature.shape[0], temperature.shape[1]), sparse=True)
         rows = rows[..., None]  # Make rows compatible for broadcasting
         cols = cols[..., None]
@@ -218,14 +153,9 @@ def process_day_climsuit_memopt(args):
 
         vern_temp = np.nanmean(temp_to_vern, axis=2, dtype=np.float16)
         vern_temp = np.nan_to_num(vern_temp, nan=-32767).astype(np.int16)
-        #vern_temp[water_mask == 1] = (get_suitability_val_dict(plant_params_forumlas, plant, 'temp', vern_temp[water_mask == 1] / 10) * 100).astype(np.int8)
-        
         vern_temp[np.nanmean(temp_to_vern[..., :dursowing], axis=2) <= (sowingtemp * 10)] = -32767
 
-        vern_prec = np.sum(prec_to_vern, axis=2, dtype=np.int16) / (days_to_vern / growing_cycle) # hypothetical precipitation over full growing cycle for shorter pre-vernalization
-
-        # If no precipitation within the first 15 days after sowing -> BBCH1 Emergence: Set Suitability to 0
-        # sowprec_params: [prec_req_after_sow, prec_req_days]
+        vern_prec = np.sum(prec_to_vern, axis=2, dtype=np.int16) / (days_to_vern / growing_cycle)
         vern_prec[np.sum(prec_to_vern[..., :sowprec_params[0]], axis=2, dtype=np.int16) <= sowprec_params[1] * 10] = 0
         del temp_to_vern, prec_to_vern
 
@@ -524,10 +454,16 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
     Note: This function processes climate data, assesses climate suitability, and saves the results in the specified format.
     """
 
-    irrigation = bool(int(climate_config['options']['irrigation']))
+    v = climate_config['options'].get('irrigation', 'n')
+    irrigation = (v.lower() == 'y' if isinstance(v, str) and v.lower() in ['y', 'n'] else bool(np.mean([int(c) for c in v]) > 0.5) if isinstance(v, str) and
+                    all(c in '01' for c in v) else bool(v) if isinstance(v, (int, float)) else False)
     crop_failure_code = 'rrpcf'
-    rrpcf_files = [os.path.join(climate_config['files']['output_dir']+'_downscaled', area_name, f) for f in os.listdir(os.path.join(climate_config['files']['output_dir']+'_downscaled', area_name)) if f.startswith(f'ds_{crop_failure_code}_{plant.lower()}_{"ir" if irrigation else "rf"}_')]
 
+    rrpcf_files = sorted([os.path.join(os.path.join(climate_config['files']['output_dir'] + '_downscaled', area_name), f) for f in\
+                          os.listdir(os.path.join(climate_config['files']['output_dir'] + '_downscaled', area_name)) if\
+                            f.startswith(f'ds_{crop_failure_code}_{plant.lower()}_{"ir" if irrigation else "rf"}_')],\
+                                key=lambda f: int(re.search(r'_(\d+)\.nc$', f).group(1))) #type:ignore
+    """
     if len(rrpcf_files) and climate_config['climatevariability'].get('consider_variability', False):
         if os.path.exists(os.path.join(os.path.split(results_path)[0]+'_var', os.path.split(results_path)[1], plant, 'climate_suitability.tif'))\
             and os.path.exists(os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1], plant,'climate_suitability.tif')):
@@ -535,7 +471,17 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
                     os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1])]
     elif os.path.exists(os.path.join(os.path.split(results_path)[0]+'_novar', plant, 'climate_suitability.tif')):
         return [os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1])]
+    """
 
+    base, sub = os.path.split(results_path)
+    val = int(climate_config['climatevariability'].get('consider_variability', 0))
+
+    if rrpcf_files:
+        tags = ['_var', '_novar'] if val == 2 else ['_var' if val == 1 else '_novar']
+        paths = [os.path.join(base + t, sub) for t in tags]
+        tif_paths = [os.path.join(p, plant, 'climate_suitability.tif') for p in paths]
+        if all(os.path.exists(p) for p in tif_paths):
+            return paths
 
     final_shape = temperature.shape
 
@@ -614,7 +560,10 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         sowingtemp = int(plant_params[plant].get('temp_for_sow', 5)[0])
     else:
         dursowing, sowingtemp = 7, 5
-    additional_conditions = [cond for i in range(100) if (cond := plant_params[plant].get(f'AddCon:{i}')) is not None]
+    if int(plant_params[plant].get('consider_in_preproc', '0')[0]) in [0, 2]:
+        additional_conditions = [cond for i in range(100) if (cond := plant_params[plant].get(f'AddCon:{i}')) is not None]
+    else:
+        additional_conditions = []
 
     no_threads, av_ram = dt.get_cpu_ram()
 
@@ -623,29 +572,11 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
     system_factor = {'darwin': 5, 'win32': 1}.get(sys.platform, 0.25)
     max_proc = int(np.clip(math.ceil(av_ram / (pixeltoprocess / 1e6)) * system_factor * wintercrop_factor, 1, no_threads-1))
 
-    """
-    area = abs((extent[3] - extent[1]) * (extent[0] - extent[2]))
-    if wintercrop:
-        factor = {'darwin': 20, 'win32': 20}.get(sys.platform, 40)
-    else:
-        factor = {'darwin': 12, 'win32': 12}.get(sys.platform, 10)
-    resolution_factor = {5: 1, 6: 0.25, 4: 5, 3: 10, 2: 12, 1: 30, 0: 60}
-    if wintercrop:
-        max_proc = int(np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads-1))
-        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads-1)
-        max_proc = np.clip(int(max_proc), 1, no_threads)
-        max_proc = np.clip(int(max_proc // 5), 1, no_threads-1)
-    else:
-        max_proc = np.clip(np.min([(no_threads - 1), ((1000 * av_ram) // (factor * area))]).astype(int), 1, no_threads-1)
-        max_proc *= np.clip(resolution_factor.get(int(climate_config['options']['resolution']), 1), 1, no_threads-1)
-        max_proc = np.clip(int(max_proc), 1, no_threads-1)
-    """
-
     ### Climate Extremes / Climate Variability Module ###
     
-    if (len(rrpcf_files) > 0) and climate_config['climatevariability'].get('consider_variability', False):
+    if (len(rrpcf_files) > 0) and int(climate_config['climatevariability'].get('consider_variability', False)) >= 1:
         use_cropfailures = True
-        print('Module for the consideration of climate extremes is activated')
+        print('Module for the consideration of interannual climate variability is activated')
         print(f' -> Reading {"irrigated" if irrigation else "rainfed"} climate variability file for {plant}')
         crop_failures = nc.read_area_from_netcdf_list(rrpcf_files, overlap=False, extent=extent, dayslices=True)
         crop_failures = np.transpose(crop_failures, axes=(2, 0, 1))
@@ -661,7 +592,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         print(' -> Data loaded')
     else:
         use_cropfailures = False
-        print('Module for the consideration of climate extremes is deactivated')
+        print('Module for the consideration of interannual climate variability is deactivated')
         crop_failures = np.zeros((365))
 
     tmp = os.path.join(os.getcwd(), 'temp')
@@ -693,7 +624,8 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             precipitation = data[1].astype(np.int8)
             failuresuit = data[2].astype(np.int8)
             sunshinesuit = data[3].astype(np.int8)
-
+        del data
+        
     else:
         cpl = False
         while not cpl:
@@ -701,15 +633,12 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             while True:
                 if len(os.listdir(tmp)) >= 365:
                     break
-                
                 if max_proc == 1:
                     for day in range(365):
                         process_day_concfut(day) 
                 else:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc) as executor:
-                        executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))
-                        
-                collect()        
+                        executor.map(process_day_concfut, range(365), chunksize=math.ceil(365 / max_proc))     
                 break
             try:
                 temperature, precipitation, failuresuit, sunshinesuit = read_tif_data_to_tempprecfail_arr((final_shape[0], final_shape[1], 365, 4))
@@ -717,45 +646,23 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             except:
                 print('Error reading climate suitability data from daily geotiff files. Retrying.')
                 [os.remove(os.path.join(tmp, f)) for f in os.listdir(tmp)]
-        collect()
-
     del crop_failures
-    collect()
 
+    
     if wintercrop:
         len_growing_cycle -= vernalization_days
 
-    if climate_config['options']['output_grow_cycle_as_doy']:
-        fuzzy_temp_growing_cycle_wdoy = temperature
-        fuzzy_precip_growing_cycle_wdoy = precipitation
-        fuzzy_fail_growing_cycle_wdoy = failuresuit
-        fuzzy_photop_growing_cycle_wdoy = sunshinesuit
-    else:
-        if len_growing_cycle >= 365:
-            fuzzy_temp_growing_cycle_wdoy = temperature
-            fuzzy_precip_growing_cycle_wdoy = precipitation
-            fuzzy_fail_growing_cycle_wdoy = failuresuit
-            fuzzy_photop_growing_cycle_wdoy = sunshinesuit
-        else:
-            fuzzy_temp_growing_cycle_wdoy = np.squeeze(np.mean(temperature[..., :364].reshape((final_shape[0], final_shape[1], 52, 7, -1)), axis=3)) # type:ignore
-            fuzzy_precip_growing_cycle_wdoy = np.squeeze(np.mean(precipitation[..., :364].reshape((final_shape[0], final_shape[1], 52, 7, -1)), axis=3)) # type:ignore
-            fuzzy_fail_growing_cycle_wdoy = np.squeeze(np.mean(failuresuit[..., :364].reshape((final_shape[0], final_shape[1], 52, 7, -1)), axis=3)) # type:ignore
-            fuzzy_photop_growing_cycle_wdoy = np.squeeze(np.mean(sunshinesuit[..., :364].reshape((final_shape[0], final_shape[1], 52, 7, -1)), axis=3)) # type:ignore
-    del temperature, precipitation, failuresuit, sunshinesuit
-    collect()
-    
     ret_paths = []
-
-    for variability in ~np.unique([climate_config['climatevariability']['consider_variability'], False]) if len(np.unique([climate_config['climatevariability']['consider_variability'], False])) > 1 else np.unique([climate_config['climatevariability']['consider_variability'], False]):
+    for variability in [False] if int(climate_config['climatevariability'].get('consider_variability', 1)) == 0 else [True] if int(climate_config['climatevariability'].get('consider_variability', 1)) == 1 else [True, False]:
         if variability:
             if not use_cropfailures:
                 continue
             print('Calculation of Climate Suitability with Consideration of Crop Failure Frequency')
-            curr_fail = fuzzy_fail_growing_cycle_wdoy 
+            curr_fail = failuresuit 
             res_path = os.path.join(os.path.split(results_path)[0]+'_var', os.path.split(results_path)[1], plant)
         else:
             print('Calculation of Climate Suitability without Consideration of Crop Failure Frequency')
-            curr_fail = np.full_like(fuzzy_temp_growing_cycle_wdoy, 100)
+            curr_fail = np.full_like(temperature, 100)
             res_path = os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1], plant)
 
         os.makedirs(res_path, exist_ok=True)
@@ -766,7 +673,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             continue
 
         print(' -> Calculating Suitability')
-        fuzzy_clim_growing_cycle_wdoy = np.min([fuzzy_temp_growing_cycle_wdoy, fuzzy_precip_growing_cycle_wdoy, curr_fail, fuzzy_photop_growing_cycle_wdoy], axis=0)
+        fuzzy_clim_growing_cycle_wdoy = np.min([temperature, precipitation, curr_fail, sunshinesuit], axis=0)
 
         if climate_config['options'].get('consider_crop_rotation', False) and len_growing_cycle < 365:
             writesuit = np.copy(fuzzy_clim_growing_cycle_wdoy).astype(np.int8)
@@ -775,34 +682,29 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
             top, left, bottom, right = extent
             height, width, depth = writesuit.shape
             transform = from_bounds(left, bottom, right, top, width, height)
-            with rasterio.open(os.path.join(res_path, 'cr_temp.tif'), 'w', driver='GTiff', height=height, width=width, count=depth, dtype=rasterio.int8,
+            with rasterio.open(os.path.join(res_path, 'climatesuitability_temp.tif'), 'w', driver='GTiff', height=height, width=width, count=depth, dtype=rasterio.int8,
                                crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
                 for i in range(depth):
                     dst.write(writesuit[:, :, i], i + 1)
             del writesuit
 
         print(' -> Calculating Suitable Sowing Days')
-        if len_growing_cycle >= 365:
-            length_of_growing_period = np.zeros_like(fuzzy_clim_growing_cycle_wdoy, dtype=np.int16)
-            if climate_config['options']['output_grow_cycle_as_doy']:
-                length_of_growing_period[fuzzy_clim_growing_cycle_wdoy > 0] = 365
-            else:
-                length_of_growing_period[fuzzy_clim_growing_cycle_wdoy > 0] = 52
-        else:
-            length_of_growing_period = (fuzzy_clim_growing_cycle_wdoy > 0).sum(axis=2).astype(np.int16)
-        
-        growing_cycle_wdoy = len_growing_cycle if climate_config['options']['output_grow_cycle_as_doy'] else len_growing_cycle // 7
+        length_of_growing_period = ((fuzzy_clim_growing_cycle_wdoy > 0).astype(np.int16) * (365 if len_growing_cycle >= 365 else 1))
+        if len_growing_cycle < 365:
+            length_of_growing_period = length_of_growing_period.sum(axis=2)
+            
+        #growing_cycle_wdoy = len_growing_cycle
         
         if len_growing_cycle >= 365:
             fuzzy_clim[water_mask] = fuzzy_clim_growing_cycle_wdoy[water_mask]
             print(' -> Calculating Optimal Sowing Date')                
             start_growing_cycle = np.full_like(fuzzy_clim_growing_cycle_wdoy, 0)
             print(' -> Calculating Limiting Factor')
-            limiting_factor = np.argmin([fuzzy_temp_growing_cycle_wdoy, fuzzy_precip_growing_cycle_wdoy, curr_fail, fuzzy_photop_growing_cycle_wdoy], axis=0).astype(np.int8)
-            temp_suit = fuzzy_temp_growing_cycle_wdoy
-            prec_suit = fuzzy_precip_growing_cycle_wdoy
+            limiting_factor = np.argmin([temperature, precipitation, curr_fail, sunshinesuit], axis=0).astype(np.int8)
+            temp_suit = temperature
+            prec_suit = precipitation
             cffq_suit = curr_fail
-            photoperiod_suit = fuzzy_photop_growing_cycle_wdoy
+            photoperiod_suit = sunshinesuit
         else:
             print(' -> Calculating Optimal Sowing Date')
             if wintercrop:
@@ -831,14 +733,14 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
                 start_growing_cycle[water_mask] = np.argmax(fuzzy_clim_growing_cycle_wdoy[water_mask, :], axis=1)
 
             # For determination of limiting factor:
-            suit_sum = fuzzy_temp_growing_cycle_wdoy.astype(np.int16) + fuzzy_precip_growing_cycle_wdoy.astype(np.int16) + curr_fail.astype(np.int16) + fuzzy_photop_growing_cycle_wdoy.astype(np.int16)
+            suit_sum = temperature.astype(np.int16) + precipitation.astype(np.int16) + curr_fail.astype(np.int16) + sunshinesuit.astype(np.int16)
             start_growing_cycle[water_mask & (start_growing_cycle <= 0)] = np.argmax(suit_sum[water_mask & (start_growing_cycle <= 0)], axis=1)
 
             print(' -> Calculating Limiting Factor')
-            temp_suit = fuzzy_temp_growing_cycle_wdoy[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
-            prec_suit = fuzzy_precip_growing_cycle_wdoy[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
+            temp_suit = temperature[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
+            prec_suit = precipitation[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
             cffq_suit = curr_fail[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
-            photoperiod_suit = fuzzy_photop_growing_cycle_wdoy[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
+            photoperiod_suit = sunshinesuit[np.arange(final_shape[0])[:,None], np.arange(final_shape[1])[None,:], start_growing_cycle] #type:ignore
             limiting_factor = np.argmin([temp_suit, prec_suit, cffq_suit, photoperiod_suit], axis=0).astype(np.int8)
 
         start_growing_cycle[fuzzy_clim == 0] = -1
@@ -849,36 +751,32 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         fuzzy_clim = np.clip(fuzzy_clim, 0, 100)
         
         # Wintercrops: Growing_Cycle = Growing_cycle + Vernalisation Period
-        growing_cycle_wdoy = growing_cycle_wdoy + vernalization_params[0] if wintercrop else growing_cycle_wdoy
+        len_growing_cycle = len_growing_cycle + vernalization_params[0] if wintercrop else len_growing_cycle
 
-        
-        threshold_time = 365 if climate_config['options']['output_grow_cycle_as_doy'] else 52
+        threshold_time = 365
         if not wintercrop:
             print(' -> Calculting Potential Multiple Cropping')
             if 'multiple_cropping_turnaround_time' in climate_config['options']:
-                try:
-                    turnaround_time = int(climate_config['options'].get('multiple_cropping_turnaround_time')) #type:ignore
-                except:
-                    turnaround_time = 21 if climate_config['options']['output_grow_cycle_as_doy'] else 3
+                turnaround_time = int(climate_config['options'].get('multiple_cropping_turnaround_time'), 21)
             else:
-                turnaround_time = 21 if climate_config['options']['output_grow_cycle_as_doy'] else 3
-            multiple_cropping[length_of_growing_period < 4 * growing_cycle_wdoy] = 3
-            multiple_cropping[length_of_growing_period < 3 * growing_cycle_wdoy] = 2
-            multiple_cropping[length_of_growing_period < 2 * growing_cycle_wdoy] = 1
+                turnaround_time = 21
+            multiple_cropping[length_of_growing_period < 4 * len_growing_cycle] = 3
+            multiple_cropping[length_of_growing_period < 3 * len_growing_cycle] = 2
+            multiple_cropping[length_of_growing_period < 2 * len_growing_cycle] = 1
             multiple_cropping[length_of_growing_period == 0] = 0
             multiple_cropping[multiple_cropping >= 3] = 3
 
-            if (3 * growing_cycle_wdoy + 3 * turnaround_time) > threshold_time:
+            if (3 * len_growing_cycle + 3 * turnaround_time) > threshold_time:
                 multiple_cropping[multiple_cropping >= 2] = 2
 
-            if (2 * growing_cycle_wdoy + 2 * turnaround_time) <= 365 and climate_config['options']['output_all_startdates']:
+            if (2 * len_growing_cycle + 2 * turnaround_time) <= 365 and climate_config['options']['output_all_startdates']:
                 print(' -> Calculation of Sowing Days for Multiple Cropping')
                 start_days = np.empty(start_growing_cycle.shape + (4,), dtype=np.int16)       
 
                 def process_index(idx):
                     i, j = idx
                     suit_vals = fuzzy_clim_growing_cycle_wdoy[i, j].astype(np.int16)
-                    start_idx, max_sum = find_max_sum_new(suit_vals, growing_cycle_wdoy + turnaround_time, multiple_cropping[i, j])
+                    start_idx, max_sum = find_max_sum_new(suit_vals, len_growing_cycle + turnaround_time, multiple_cropping[i, j])
                     
                     multiple_cropping[i, j] = min(1 if np.max(suit_vals) >= np.sum(suit_vals[start_idx]) else np.sum(suit_vals[start_idx] > 1), multiple_cropping[i, j])
                     if multiple_cropping[i, j] > 1:
@@ -933,12 +831,6 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         cffq_suit[land_sea_mask == 0] = -1
         photoperiod_suit[land_sea_mask == 0] = -1
 
-        #np.save(os.path.join(res_path, 'fuzzy_clim.npy'), fuzzy_clim)
-        #np.save(os.path.join(res_path, 'optimal_sowing_date.npy'), start_growing_cycle)
-        #np.save(os.path.join(res_path, 'multiple_cropping.npy'), multiple_cropping)
-        #np.save(os.path.join(res_path, 'suitable_sowing_days.npy'), length_of_growing_period)
-        #np.save(os.path.join(res_path, 'limiting_factor.npy'), limiting_factor)
-
         if climate_config['options']['output_all_limiting_factors']:
             all_array = np.asarray([temp_suit, prec_suit, cffq_suit, photoperiod_suit])
             all_array[np.isnan(all_array)] = -1
@@ -976,7 +868,7 @@ def climsuit_new(climate_config, extent, temperature, precipitation, land_sea_ma
         limiting_factor = np.zeros((final_shape[0], final_shape[1]), dtype=np.int8)
         del curr_fail
 
-    del fuzzy_temp_growing_cycle_wdoy, fuzzy_precip_growing_cycle_wdoy, fuzzy_fail_growing_cycle_wdoy
+    del temperature, precipitation, failuresuit
     for i in range(365):
         try:
             os.remove(os.path.join(tmp, f'{i}.npy'))
@@ -1016,22 +908,16 @@ def climate_suitability(climate_config, extent, temperature, precipitation, land
     Note: This function processes climate data for multiple plants using the CropSuite model and aggregates the results.
     """
     plant_list = [plant for plant in plant_params]
-    final_shape = temperature.shape
     ret_paths = []
 
     for idx, plant in enumerate(plant_params):
-        res_path = os.path.join(results_path, plant)
-        if climate_config['climatevariability'].get('consider_variability', False):
-            ret_paths = [os.path.join(os.path.split(results_path)[0]+'_var',\
-                                    os.path.split(results_path)[1]), os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1])]
-            if os.path.exists(os.path.join(ret_paths[1], plant, 'climate_suitability.tif')):
-                print(f' -> {plant} already created. Skipping')
-                continue
-        else:
-            ret_paths = [os.path.join(os.path.split(results_path)[0]+'_novar', os.path.split(results_path)[1])]
-            if os.path.exists(os.path.join(ret_paths[0], plant, 'climate_suitability.tif')):
-                print(f' -> {plant} already created. Skipping')
-                continue
+        val = int(climate_config['climatevariability'].get('consider_variability', 0))
+        base, sub = os.path.split(results_path)
+        tags = ['_novar', '_var'] if val == 2 else ['_novar' if val == 0 else '_var']
+        ret_paths = [os.path.join(base + t, sub) for t in tags]
+        if os.path.exists(os.path.join(ret_paths[-1], plant, 'climate_suitability.tif')):
+            print(f' -> {plant} already created. Skipping')
+            continue
 
         print(f'\nProcessing {plant} - {idx+1} out of {len(plant_list)} crops\n')
         climsuit_new(climate_config, extent, temperature, precipitation, land_sea_mask, plant_params, plant_params_formulas, results_path, plant, area_name)

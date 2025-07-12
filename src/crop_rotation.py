@@ -26,7 +26,6 @@ def crop_rotation(config_file):
             rotation_dict = {crop: int(plant_params[crop].get('growing_cycle')[0]) for crop in crops if crop in plant_params.keys()}
             rotation_combinations = [[a, b] for a in crops for b in crops if a != b and a in rotation_dict.keys() and b in rotation_dict.keys() and (rotation_dict[a] + rotation_dict[b] + 2 * resting_period) <= 365]
 
-
             """
             # DEBUG
 
@@ -65,8 +64,8 @@ def calculate_suitabilities(suitabilities_a, suitabilities_b, resting, gc_a, gc_
                         rng_b = suitabilities_b[y, x, b_start:b_end]
                         suit_b = np.max(rng_b)
                         idx_b = b_start + np.argmax(rng_b)
-                        suit_array[day, 0] = timerange_a[day] if timerange_a[day] > 0 else -1
-                        suit_array[day, 1] = suit_b if suit_b > 0 else -1
+                        suit_array[day, 0] = timerange_a[day] if timerange_a[day] else -1
+                        suit_array[day, 1] = suit_b if suit_b else -1
                         suit_array[day, 2] = day
                         suit_array[day, 3] = idx_b
                     else:
@@ -82,6 +81,43 @@ def calculate_suitabilities(suitabilities_a, suitabilities_b, resting, gc_a, gc_
             dates[y, x, 1] = suit_array[idx, 3]
     return suits, dates
 
+@njit(parallel=True)
+def calculate_suitabilities_test(suitabilities_a, suitabilities_b, resting, gc_a, gc_b):
+    height, width = suitabilities_a.shape[:2]
+    suits = np.full((height, width, 2), -1, dtype=np.int8)
+    dates = np.full((height, width, 2), -1, dtype=np.int16)
+
+    for y in prange(height):
+        for x in range(width):
+            timerange_a = suitabilities_a[y, x]
+            timerange_b = suitabilities_b[y, x]
+            max_val = -1
+            best_i = -1
+            best_j = -1
+            for i in range(730):
+                a_val = timerange_a[i]
+                if a_val <= 0:
+                    continue
+                min_j = i + gc_a + resting + 1
+                max_j = min(365, 365 + i - gc_b - resting)
+                for j in range(min_j, max_j):
+                    if j >= 365:
+                        continue
+                    b_val = timerange_b[j]
+                    if b_val <= 0:
+                        continue
+                    total = a_val + b_val
+                    if total > max_val:
+                        max_val = total
+                        best_i = i
+                        best_j = j
+            if best_i != -1:
+                suits[y, x, 0] = timerange_a[best_i]
+                suits[y, x, 1] = timerange_b[best_j]
+                dates[y, x, 0] = best_i
+                dates[y, x, 1] = best_j
+    return suits, dates
+
 def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
     results = os.path.join(results_folder, 'crop_rotation', f'{crop_a}_{crop_b}')
     if os.path.exists(results):
@@ -90,13 +126,13 @@ def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
 
     print(f'-> Computing {crop_a} - {crop_b}')
     os.makedirs(results, exist_ok=True)
-    extent = dt.get_geotiff_extent(os.path.join(results_folder, crop_a, 'cr_temp.tif'))
-    suitabilities_a = dt.read_tif_file_with_bands(os.path.join(results_folder, crop_a, 'cr_temp.tif')).astype(np.int8)
-    suitabilities_b = dt.read_tif_file_with_bands(os.path.join(results_folder, crop_b, 'cr_temp.tif')).astype(np.int8)
+    extent = dt.get_geotiff_extent(os.path.join(results_folder, crop_a, 'climatesuitability_temp.tif'))
+    suitabilities_a = dt.read_tif_file_with_bands(os.path.join(results_folder, crop_a, 'climatesuitability_temp.tif')).astype(np.int8)
+    suitabilities_b = dt.read_tif_file_with_bands(os.path.join(results_folder, crop_b, 'climatesuitability_temp.tif')).astype(np.int8)
     suitabilities_a = np.concatenate([suitabilities_a, suitabilities_a], axis=2)
     suitabilities_b = np.concatenate([suitabilities_b, suitabilities_b], axis=2)
-
-    suits, dates = calculate_suitabilities(suitabilities_a, suitabilities_b, resting, gc_a, gc_b)
+    
+    suits, dates = calculate_suitabilities_test(suitabilities_a, suitabilities_b, resting, gc_a, gc_b)
 
     suit_a = suits[..., 0]
     suit_b = suits[..., 1]
@@ -159,5 +195,5 @@ def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
 
 
 if __name__ == '__main__':
-    crop_rotation('world.ini')
+    crop_rotation('brazil.ini')
 
