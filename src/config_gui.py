@@ -15,6 +15,8 @@ import cartopy.feature as cfeature
 import os
 import sys
 from pathlib import Path
+from typing import Literal
+
 
 class ConfigGUI(tk.Tk):
     def __init__(self, config_ini_path):
@@ -48,6 +50,7 @@ class ConfigGUI(tk.Tk):
         self.param_tab = self.add_tab("Parameters")        
         self.clim_tab = self.add_tab('Climate Data Preprocessing')
         self.adapt_tab = self.add_tab('Management')
+        self.out_tab = self.add_tab('Outputs')
 
         self.fill_path_tab()
         self.fill_options_tab()
@@ -56,6 +59,7 @@ class ConfigGUI(tk.Tk):
         self.fill_param_tab()
         self.fill_clim_tab()
         self.fill_adapt_tab()
+        self.fill_out_tab()
 
         self.press_count = 0
         self.selected_extent = None
@@ -78,7 +82,7 @@ class ConfigGUI(tk.Tk):
         frame.pack(fill='x', padx=10, pady=5)
         tk.Label(frame, text=label_text).pack(side='left', padx=(0, 5))
         setattr(self, var_name, tk.StringVar(self, os.path.join(self.config_dict['files'].get(config_key, ''))))
-        entry = tk.Entry(frame, textvariable=getattr(self, var_name))
+        entry = tk.Entry(frame, textvariable=getattr(self, var_name), state='disabled')
         self.set_path_check(entry)
         entry.pack(side='left', fill='x', expand=True)
         tk.Button(frame, text='Change', command=lambda e=entry: self.select_path(e, config_key, ftype)).pack(side='left', padx=5)
@@ -96,8 +100,10 @@ class ConfigGUI(tk.Tk):
     def select_path(self, entry, config_key, ftype=True):
         path = filedialog.askopenfilename(title="Select file") if ftype else filedialog.askdirectory(title="Select directory")
         if path:
+            entry.config(state='normal')
             entry.delete(0, tk.END)
             entry.insert(0, path)
+            entry.config(state='disabled')
         self.set_path_check(entry)
         self.config_dict['files'][config_key] = os.path.join(entry.get())
 
@@ -111,12 +117,23 @@ class ConfigGUI(tk.Tk):
     def checkbox_to_dict(self, var_name, section, config_key):
         self.config_dict[section][config_key] = getattr(self, var_name).get()
 
-    def add_checkbox(self, parent, label, var_name, section, config_key):
+    def add_checkbox(self, parent, label, var_name, section, config_key, state: Literal['normal', 'active', 'disabled'] = 'normal',
+                     default = None, listener = None, side: Literal['left', 'right', 'top', 'bottom'] = 'left', anchor = None, pad_y: int = 5):
         frame = tk.Frame(parent)
-        frame.pack(fill='x', padx=10, pady=5)
-        setattr(self, var_name, tk.IntVar(self, self.config_dict[section].get(config_key, 'n')))
-        cb = tk.Checkbutton(frame, variable=getattr(self, var_name), text=label, command=lambda: self.checkbox_to_dict(var_name, section, config_key))
-        cb.pack(side='left')
+        frame.pack(fill='x', padx=10, pady=pad_y)
+        self.config_dict.setdefault(section, {})
+        if default:
+            self.config_dict[section].setdefault(config_key, default)
+        setattr(self, var_name, tk.IntVar(self, self.config_dict[section].get(config_key, 0)))
+        def on_change():
+            self.checkbox_to_dict(var_name, section, config_key)
+            if listener:
+                listener()
+        cb = tk.Checkbutton(frame, variable=getattr(self, var_name), text=label, command=on_change, state=state)
+        if anchor:
+            cb.pack(side=side, anchor=anchor)
+        else:
+            cb.pack(side=side)
         return cb
     
     def combobox_to_dict(self, var_name, section, config_key, by_index=False, options=[]):
@@ -171,25 +188,23 @@ class ConfigGUI(tk.Tk):
         getattr(self, 'resolution_slider').set(min([0, 1, 2, 3, 4, 5, 6], key=lambda x: abs(x - float(value))))
         self.config_dict['options']['resolution'] = getattr(self, 'resolution_slider').get()
 
-    def add_radiobuttons(self, parent, label, var_name, section, config_key, options):
-       
+    def add_radiobuttons(self, parent, label, var_name, section, config_key, options, listener=None):
         initial_value = int(self.config_dict[section].get(config_key, 0))
         var = tk.IntVar(self, value=initial_value)
         setattr(self, var_name, var)
-        
+        def on_change():
+            self.checkbox_to_dict(var_name, section, config_key)
+            if listener:
+                listener()
         for text, value in options:
-            rb = tk.Radiobutton(parent, text=text, variable=var, value=value,
-                                command=lambda: self.checkbox_to_dict(var_name, section, config_key))
+            rb = tk.Radiobutton(parent, text=text, variable=var, value=value, command=on_change)
             rb.pack(anchor='w', padx=5, pady=2)
-
 
     def fill_options_tab(self):
         gen_frm = ttk.LabelFrame(self.options_tab, text='General Options')
         gen_frm.pack(fill='x', padx=10, pady=5)
         self.add_checkbox(gen_frm, 'Use scheduler', 'use_scheduler_var', 'options', 'use_scheduler')
-        self.add_checkbox(gen_frm, 'Output all limiting factors', 'output_all_lim_var', 'options', 'output_all_limiting_factors')
         self.add_checkbox(gen_frm, 'Remove interim results', 'rem_interims_var', 'options', 'remove_interim_results')
-        self.add_checkbox(gen_frm, 'Output aggregated soil data', 'out_agg_soil_var', 'options', 'output_soil_data')
 
         msf_frm = ttk.LabelFrame(self.options_tab, text='Membership Functions')
         msf_frm.pack(fill='x', padx=10, pady=5)
@@ -198,7 +213,7 @@ class ConfigGUI(tk.Tk):
         cvr_frm = ttk.LabelFrame(self.options_tab, text='Climate Variability')
         cvr_frm.pack(fill='x', padx=10, pady=5)
         self.add_radiobuttons(cvr_frm, 'Consider climate variability:', 'cons_variability_var', 'climatevariability', 'consider_variability',\
-                              [('Without variability', 0), ('With variability', 1), ('With and without variability', 2)] )
+                              [('Without variability', 0), ('With variability', 1), ('With and without variability', 2)], listener=self.climvar_change)
 
         out_frm = ttk.LabelFrame(self.options_tab, text='Data Format')
         out_frm.pack(fill='x', padx=10, pady=5)
@@ -223,8 +238,41 @@ class ConfigGUI(tk.Tk):
 
         tur_frm = ttk.LabelFrame(self.options_tab, text='Multiple Cropping')
         tur_frm.pack(fill='x', padx=10, pady=5)
-        self.add_checkbox(tur_frm, 'Consider crop rotations (for all combinations of selected crops)', 'crop_rot', 'options', 'consider_crop_rotation')
+        
+        self.add_checkbox(tur_frm, 'Multiple cropping', 'mult_crop', 'options', 'consider_multiple_cropping', listener=self.multcrop_set_outputs)
+        self.add_checkbox(tur_frm, 'Consider crop rotations (for all combinations of selected crops)', 'crop_rot', 'options', 'consider_crop_rotation', listener=self.croprotation_set_outputs)
         self.add_spinbox(tur_frm, 'Processing time between harvest and\nsowing for multiple cropping [Days]', 'proc_time_var', 'options', 'multiple_cropping_turnaround_time')
+
+    def climvar_change(self):
+        attrs = ['out_rrpcf', 'out_rrpcfmc1', 'out_rrpcfmc2', 'out_rrpcfmc3', 'out_crrrpcf1', 'out_crrrpcf2']
+        if getattr(self, 'cons_variability_var').get() == 0:
+            [getattr(self, attr).set(0) for attr in attrs]
+
+    def croprotation_set_outputs(self):
+        if getattr(self, 'crop_rot').get():
+            getattr(self, 'out_soilsuit').set(1)
+            [getattr(self, attr).set(1) for attr in ['out_cr12clim', 'out_cr12crop', 'out_cr1clim', 'out_cr1crop', 'out_cr2clim', 'out_cr2crop',
+                                                     'out_cr1sowd', 'out_cr1havd', 'out_cr2sowd', 'out_cr2havd']]
+        else:
+            [getattr(self, attr).set(0) for attr in ['out_cr12clim', 'out_cr12crop', 'out_cr1clim', 'out_cr1crop', 'out_cr2clim', 'out_cr2crop',
+                                                     'out_cr1sowd', 'out_cr1havd', 'out_cr2sowd', 'out_cr2havd', 'out_crrrpcf1', 'out_crrrpcf2']]
+
+    def multcrop_set_outputs(self):
+        if getattr(self, 'mult_crop').get():
+            getattr(self, 'out_multcrop').set(1)
+            getattr(self, 'out_mcsuit').set(1)
+            getattr(self, 'out_mcsow1').set(1)
+            getattr(self, 'out_mcsow2').set(1)
+            getattr(self, 'out_mcsow3').set(1)
+        else:
+            getattr(self, 'out_multcrop').set(0)
+            getattr(self, 'out_mcsuit').set(0)
+            getattr(self, 'out_mcsow1').set(0)
+            getattr(self, 'out_mcsow2').set(0)
+            getattr(self, 'out_mcsow3').set(0)
+            getattr(self, 'out_rrpcfmc1').set(0)
+            getattr(self, 'out_rrpcfmc2').set(0)
+            getattr(self, 'out_rrpcfmc3').set(0)
 
     ### EXTENT ###
 
@@ -474,6 +522,7 @@ class ConfigGUI(tk.Tk):
     def snap_to_nearest(self, value):
         getattr(self, 'liming_slider').set(min([0, 1, 2, 3], key=lambda x: abs(x - float(value))))
         self.config_dict['options']['simulate_calcification'] = getattr(self, 'liming_slider').get()
+        self.check_lim_outs()
 
     def update_irrigation_main(self, value_string):
         if all(c in '0' for c in value_string):
@@ -560,7 +609,6 @@ class ConfigGUI(tk.Tk):
         irg_frm = ttk.LabelFrame(self.adapt_tab, text='Irrigation')
         irg_frm.pack(fill='x', padx=10, pady=5)
         self.add_checkbox(irg_frm, 'Irrigation', 'irrigation_var', 'options', 'irrigation')
-
         #self.create_irrigation(irg_frm)
 
         lime_frm = ttk.LabelFrame(self.adapt_tab, text='Liming')
@@ -577,6 +625,15 @@ class ConfigGUI(tk.Tk):
             label = tk.Label(labels_frame, text=text, width=20)
             label.grid(row=0, column=i, sticky="")
             labels_frame.columnconfigure(i, weight=1)
+
+    def check_lim_outs(self):
+        attrs = ['out_limeapp', 'out_phaft', 'out_phinc']
+        if int(getattr(self, 'liming_slider').get()) > 0:
+            for attr in attrs:
+                getattr(self, attr).set(1)
+        else:
+            for attr in attrs:
+                getattr(self, attr).set(0)
 
     ### PARAMETERS ###
     def fill_param_tab(self):
@@ -622,6 +679,10 @@ class ConfigGUI(tk.Tk):
     def get_all_membershipfunction_names(self):
         all_pairs = []
         directory = os.path.join(self.config_dict['files'].get('plant_param_dir', 'plant_params'), 'available')
+        if not os.path.exists(directory):
+            directory = os.path.join(os.getcwd(), 'plant_params', 'available')
+        if not os.path.exists(directory):
+            return []
         for filename in os.listdir(directory):
             if filename.endswith('.inf'):
                 with open(os.path.join(directory, filename), 'r') as file:
@@ -866,6 +927,156 @@ class ConfigGUI(tk.Tk):
         print('Config written to file')
         self.destroy()
 
+    ### OUTPUTS ###
+    def fill_out_tab(self):
+        out_frm = ttk.LabelFrame(self.out_tab, text='Selection of output files')
+        out_frm.pack(fill='x', padx=10, pady=5)
+
+        basic_frm = ttk.LabelFrame(out_frm, text='Basic outputs')
+        basic_frm.pack(fill='x', padx=10, pady=5)
+        basic_frm1 = ttk.Frame(basic_frm, width=300, height=100)
+        basic_frm2 = ttk.Frame(basic_frm, width=300, height=100)
+        basic_frm1.pack(side='left', padx=5, pady=5)
+        basic_frm2.pack(side='left', padx=5, pady=5)
+        basic_frm1.pack_propagate(False)
+        basic_frm2.pack_propagate(False)
+        self.add_checkbox(basic_frm1, 'Climate suitability', 'out_climsuit', 'outputs', 'climate_suitability', state='disabled', default=1, pad_y=0)
+        self.add_checkbox(basic_frm1, 'Climate most limiting factor', 'out_climfact', 'outputs', 'limiting_factor', state='disabled', default=1, pad_y=0)
+        self.add_checkbox(basic_frm1, 'Crop suitability (climate & soil)', 'out_cropsuit', 'outputs', 'crop_suitability', pad_y=0)
+        self.add_checkbox(basic_frm1, 'Crop most limiting factor (climate & soil)', 'out_limfact', 'outputs', 'crop_limiting_factor', pad_y=0)
+        self.add_checkbox(basic_frm2, 'Soil suitability', 'out_soilsuit', 'outputs', 'soil_suitability', listener=self.croprot_missing_check, pad_y=0)
+        self.add_checkbox(basic_frm2, 'Suitable sowing days', 'out_suitsowdays', 'outputs', 'suitable_sowing_days', pad_y=0)
+        self.add_checkbox(basic_frm2, 'Optimal sowing date', 'out_optsowdate', 'outputs', 'optimal_sowing_date', pad_y=0)
+
+        vern_frm = ttk.LabelFrame(out_frm, text='Wintercrop outputs')
+        vern_frm.pack(fill='x', padx=10, pady=5)
+        vern_frm1 = ttk.Frame(vern_frm, width=300, height=25)
+        vern_frm2 = ttk.Frame(vern_frm, width=300, height=25)
+        vern_frm1.pack(side='left', padx=5, pady=5)
+        vern_frm2.pack(side='left', padx=5, pady=5)
+        vern_frm1.pack_propagate(False)
+        vern_frm2.pack_propagate(False)
+        self.add_checkbox(vern_frm1, 'Optimal sowing date with vernalization period', 'out_vernsow', 'outputs', 'optimal_sowing_date_with_vernalization', pad_y=0)
+        self.add_checkbox(vern_frm2, 'Restart of growing cycle after vernalization', 'out_vernstart', 'outputs', 'start_growing_cycle_after_vernalization', pad_y=0)
+
+        multc_frm = ttk.LabelFrame(out_frm, text='Intra-annual multiple cropping outputs (same-crop)')
+        multc_frm.pack(fill='x', padx=10, pady=5)
+        multc_frm1 = ttk.Frame(multc_frm, width=300, height=80)
+        multc_frm2 = ttk.Frame(multc_frm, width=300, height=80)
+        multc_frm1.pack(side='left', padx=5, pady=5)
+        multc_frm2.pack(side='left', padx=5, pady=5)
+        multc_frm1.pack_propagate(False)
+        multc_frm2.pack_propagate(False)
+        self.add_checkbox(multc_frm1, 'Potential harvests per year', 'out_multcrop', 'outputs', 'multiple_cropping', listener=self.multcrop_missing_check, pad_y=0)
+        self.add_checkbox(multc_frm1, 'Climate suitability (additive)', 'out_mcsuit', 'outputs', 'climate_suitability_mc', listener=self.multcrop_missing_check, pad_y=0)
+        self.add_checkbox(multc_frm2, 'First optimal sowing date', 'out_mcsow1', 'outputs', 'optimal_sowing_date_mc_first', listener=self.multcrop_missing_check, pad_y=0)
+        self.add_checkbox(multc_frm2, 'Second optimal sowing date', 'out_mcsow2', 'outputs', 'optimal_sowing_date_mc_second', listener=self.multcrop_missing_check, pad_y=0)
+        self.add_checkbox(multc_frm2, 'Third optimal sowing date', 'out_mcsow3', 'outputs', 'optimal_sowing_date_mc_third', listener=self.multcrop_missing_check, pad_y=0)
+
+        crot_frm = ttk.LabelFrame(out_frm, text='Intra-annual crop rotation outputs (different crops)')
+        crot_frm.pack(fill='x', padx=10, pady=5)
+        crot_frm1 = ttk.Frame(crot_frm, width=300, height=100)
+        crot_frm2 = ttk.Frame(crot_frm, width=300, height=100)
+        crot_frm3 = ttk.Frame(crot_frm, width=300, height=100)
+        crot_frm1.pack(side='left', padx=5, pady=5)
+        crot_frm2.pack(side='left', padx=5, pady=5)
+        crot_frm3.pack(side='left', padx=5, pady=5)
+        crot_frm1.pack_propagate(False)
+        crot_frm2.pack_propagate(False)
+        crot_frm3.pack_propagate(False)
+        self.add_checkbox(crot_frm1, 'Climate suitability (additive)', 'out_cr12clim', 'outputs', '12_climate_suitability', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm1, 'Crop suitability (additive)', 'out_cr12crop', 'outputs', '12_crop_suitability', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm2, '#1 Climate suitability', 'out_cr1clim', 'outputs', '1_climate_suitability', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm2, '#1 Crop suitability', 'out_cr1crop', 'outputs', '1_crop_suitability', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm3, '#2 Climate suitability', 'out_cr2clim', 'outputs', '2_climate_suitability', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm3, '#2 Crop suitability', 'out_cr2crop', 'outputs', '2_crop_suitability', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm2, '#1 Sowing date', 'out_cr1sowd', 'outputs', '1_sowing_date', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm2, '#1 Harvest date', 'out_cr1havd', 'outputs', '1_harvest_date', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm3, '#2 Sowing date', 'out_cr2sowd', 'outputs', '2_sowing_date', listener=self.croprot_check, pad_y=0)
+        self.add_checkbox(crot_frm3, '#2 Harvest date', 'out_cr2havd', 'outputs', '2_harvest_date', listener=self.croprot_check, pad_y=0)
+
+        var_frm = ttk.LabelFrame(out_frm, text='Variability outputs (recurrence rate of potential crop failures)')
+        var_frm.pack(fill='x', padx=10, pady=5)
+        var_frm1 = ttk.Frame(var_frm, width=300, height=80)
+        var_frm2 = ttk.Frame(var_frm, width=300, height=80)
+        var_frm3 = ttk.Frame(var_frm, width=300, height=80)
+        var_frm1.pack(side='left', padx=5, pady=5)
+        var_frm2.pack(side='left', padx=5, pady=5)
+        var_frm3.pack(side='left', padx=5, pady=5)
+        var_frm1.pack_propagate(False)
+        var_frm2.pack_propagate(False)
+        var_frm3.pack_propagate(False)
+        self.add_checkbox(var_frm1, 'rrpcf', 'out_rrpcf', 'outputs', 'rrpcf', pad_y=0, listener=self.var_check)
+        self.add_checkbox(var_frm2, 'rrpcf first multiple cropping', 'out_rrpcfmc1', 'outputs', 'rrpcfmc1', pad_y=0, listener=self.var_check)
+        self.add_checkbox(var_frm2, 'rrpcf second multiple cropping', 'out_rrpcfmc2', 'outputs', 'rrpcfmc2', pad_y=0, listener=self.var_check)
+        self.add_checkbox(var_frm2, 'rrpcf third multiple cropping', 'out_rrpcfmc3', 'outputs', 'rrpcfmc3', pad_y=0, listener=self.var_check)
+        self.add_checkbox(var_frm3, 'rrpcf crop rotation #1', 'out_crrrpcf1', 'outputs', 'crrrpcf1', pad_y=0, listener=self.var_check)
+        self.add_checkbox(var_frm3, 'rrpcf crop rotation #2', 'out_crrrpcf2', 'outputs', 'crrrpcf2', pad_y=0, listener=self.var_check)
+        
+        lim_frm = ttk.LabelFrame(out_frm, text='Management outputs')
+        lim_frm.pack(fill='x', padx=10, pady=5)
+        lim_frm1 = ttk.Frame(lim_frm, width=300, height=25)
+        lim_frm2 = ttk.Frame(lim_frm, width=300, height=25)
+        lim_frm3 = ttk.Frame(lim_frm, width=300, height=25)
+        lim_frm1.pack(side='left', padx=5, pady=5)
+        lim_frm2.pack(side='left', padx=5, pady=5)
+        lim_frm3.pack(side='left', padx=5, pady=5)
+        lim_frm1.pack_propagate(False)
+        lim_frm2.pack_propagate(False)
+        lim_frm3.pack_propagate(False)
+        self.add_checkbox(lim_frm1, 'Lime application [t/ha]', 'out_limeapp', 'outputs', 'lime_application', pad_y=0, listener=self.lim_check)
+        self.add_checkbox(lim_frm2, 'pH after liming', 'out_phaft', 'outputs', 'ph_after_liming', pad_y=0, listener=self.lim_check)
+        self.add_checkbox(lim_frm3, 'pH increase', 'out_phinc', 'outputs', 'ph_increase', pad_y=0, listener=self.lim_check)
+
+        self.add_checkbox(out_frm, 'Output aggregated soil data', 'out_agg_soil_var', 'options', 'output_soil_data', pad_y=0)
+        self.add_checkbox(out_frm, 'Output suitability of all factors', 'output_all_lim_var', 'options', 'output_all_limiting_factors', pad_y=0)
+
+    def lim_check(self):
+        attrs = ['out_limeapp', 'out_phaft', 'out_phinc']
+        if any(getattr(self, attr).get() for attr in attrs):
+            getattr(self, 'liming_slider').set(1)
+
+    def var_check(self):
+        attrs = ['out_rrpcf', 'out_rrpcfmc1', 'out_rrpcfmc2', 'out_rrpcfmc3']
+        if any(getattr(self, attr).get() for attr in attrs):
+            if getattr(self, 'cons_variability_var').get() == 0:
+                getattr(self, 'cons_variability_var').set(2)
+        attrs = ['out_rrpcfmc1', 'out_rrpcfmc2', 'out_rrpcfmc3']
+        if any(getattr(self, attr).get() for attr in attrs):
+            getattr(self, 'mult_crop').set(1)
+            if getattr(self, 'cons_variability_var').get() == 0:
+                getattr(self, 'cons_variability_var').set(2)
+        attrs = ['out_crrrpcf1', 'out_crrrpcf2']
+        if any(getattr(self, attr).get() for attr in attrs):
+            getattr(self, 'crop_rot').set(1)
+            if getattr(self, 'cons_variability_var').get() == 0:
+                getattr(self, 'cons_variability_var').set(2)
+
+    def croprot_check(self):
+        attrs = ['out_cr12clim', 'out_cr12crop', 'out_cr1clim', 'out_cr1crop', 'out_cr2clim', 'out_cr2crop',
+                 'out_cr1sowd', 'out_cr1havd', 'out_cr2sowd', 'out_cr2havd']
+        if all(not getattr(self, attr).get() for attr in attrs):
+            getattr(self, 'crop_rot').set(0)
+        if any(getattr(self, attr).get() for attr in attrs):
+            getattr(self, 'crop_rot').set(1)
+            getattr(self, 'out_soilsuit').set(1)
+
+    def croprot_missing_check(self):
+        if not getattr(self, 'out_soilsuit').get():
+            getattr(self, 'crop_rot').set(0)
+            attrs = ['out_cr12clim', 'out_cr12crop', 'out_cr1clim', 'out_cr1crop', 'out_cr2clim', 'out_cr2crop',
+                 'out_cr1sowd', 'out_cr1havd', 'out_cr2sowd', 'out_cr2havd']
+            for attr in attrs:
+                getattr(self, attr).set(0)
+
+    def multcrop_missing_check(self):
+        if getattr(self, 'out_multcrop').get() or getattr(self, 'out_mcsuit').get() or getattr(self, 'out_mcsow1').get() or getattr(self, 'out_mcsow2').get() or getattr(self, 'out_mcsow3').get():
+            getattr(self, 'mult_crop').set(1)
+            
+        else:
+            getattr(self, 'mult_crop').set(0)
+
+        #add_checkbox(self, parent, label, var_name, section, config_key)
 
 if __name__ == "__main__":
     #pass

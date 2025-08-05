@@ -47,11 +47,12 @@ import warnings
 import xarray as xr
 from src import plant_param_gui
 from src import config_gui as cfg
+from src import debug as dbg
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-version = '1.4.5'
-date = '2025-07-12'
+version = '1.5.1'
+date = '2025-08-05'
 current_cfg = ''
 
 plant_param_dir = ''
@@ -1574,6 +1575,25 @@ def open_viewer_beta(config):
     view = viewer.ViewerGUI(results_path, config, viewer_gui)
     view.mainloop()
 
+def show_debug_info():
+    msg = (
+        "The DumpFile.dmp created in the CropSuite folder should be sent by email to "
+        "florian.zabel@unibas.ch or matthias.knuettel@unibas.ch.\n\n"
+        "Please include a brief error description."
+    )
+    dbg_rt = tk.Toplevel()
+    dbg_rt.title("Debug Notice")
+    x, y = 450, 150
+    dbg_rt.geometry(f'{x}x{y}+{(dbg_rt.winfo_screenwidth() - x) // 2}+{(dbg_rt.winfo_screenheight() - y) // 2}')
+    dbg_rt.focus_force()
+    label = tk.Label(dbg_rt, text=msg, wraplength=420, justify="left", padx=10, pady=10)
+    label.pack(fill="both", expand=True)
+    btn = tk.Button(dbg_rt, text="OK", command=dbg_rt.destroy)
+    btn.pack(pady=5)
+    dbg_rt.grab_set()
+    dbg_rt.wait_window()
+    #dbg_rt.mainloop()
+
 def main_gui():
     global plant_param_dir
     plant_param_dir = ''
@@ -1614,9 +1634,6 @@ def main_gui():
     canvas.create_text(139, 180, text=f'© 2023-{datetime.strptime(date, "%Y-%m-%d").strftime("%Y")} Matthias Knüttel & Florian Zabel',
                        font=("Helvtica", 9, "bold"), fill="#181818")
     canvas.image = header_image_tk #type:ignore
-
-    #head_lab = Label(main_window, image=header_image, relief='flat') #type:ignore
-    #head_lab.pack()
     
     def open_viewer(config):
         viewer_gui(config)
@@ -1790,8 +1807,10 @@ def main_gui():
 
     rt = Tk()
     rt.withdraw()
-    #preproc_button = Button(frm, text='Preprocessing', compound='left', command=lambda: ppgui.preproc_gui(tk.Toplevel(rt), config_ini_var.get()))
-    #preproc_button.pack(side='left', padx=5, pady=5)
+    
+    #debug_var = tk.BooleanVar()
+    #debug_cb = Checkbutton(frm, text='Create Dump File', compound='left', variable=debug_var)
+    #debug_cb.pack(side='left', padx=5, pady=5)
 
     manual_button = Button(frm, text=' Open Manual', command=open_manual, compound='left')
     manual_button.pack(side='right', padx=5, pady=5)
@@ -1912,17 +1931,14 @@ def main_gui():
     Label(main_window, text='2 - Crop Selection').pack(pady=5, padx=5, anchor='w')
     frame = Frame(main_window, border=4)
     frame.pack()
-    try:
-        os.makedirs(plant_param_dir, exist_ok=True)
-        no_crops = sum(1 for file in os.listdir(plant_param_dir) if file.endswith('.inf'))
-    except:
-        no_crops = 0 
+    os.makedirs(plant_param_dir, exist_ok=True)
 
     sel_but = Button(frame, text=' Select Crops', compound='left', command=lambda: open_plant_gui())
     sel_but.pack(side='left', padx=10)
     Label(main_window, text='').pack()
 
     def start(ini_path):
+        dbg.write_debug_package(ini_path)
         main_window.destroy()
         start_secproc(ini_path)
 

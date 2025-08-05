@@ -100,7 +100,8 @@ if [ "$ONLINE" = true ]; then
         psutil==7.0.0 \
         pyproj==3.7.1 \
         scikit-image==0.25.2 \
-        tk
+        tk \
+				pyzipper
 
     echo
     echo "======================================="

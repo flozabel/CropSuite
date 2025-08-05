@@ -72,10 +72,20 @@ def calculate_daily_temp_mean(temp_files, out_file, start_year, end_year, extent
         if extent == [0, 0, 0, 0]:
             ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'))
         else:
-            lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds.lat[0] > ds.lat[-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
-            lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds.lon[0] < ds.lon[-1] else slice(float(extent.get('right')), float(extent.get('left')))
+            #lat_slc = slice(float(extent.get('top')), float(extent.get('bottom'))) if ds.lat[0] > ds.lat[-1] else slice(float(extent.get('bottom')), float(extent.get('top')))
+            #lon_slc = slice(float(extent.get('left')), float(extent.get('right'))) if ds.lon[0] < ds.lon[-1] else slice(float(extent.get('right')), float(extent.get('left')))
+            
+            lat_min, lat_max = float(extent['bottom']), float(extent['top'])
+            lon_min, lon_max = float(extent['left']), float(extent['right'])
+
+            lat_cond = (ds.lat >= lat_min) & (ds.lat <= lat_max) if ds.lat[0] < ds.lat[-1] else (ds.lat <= lat_max) & (ds.lat >= lat_min)
+            lon_cond = (ds.lon >= lon_min) & (ds.lon <= lon_max) if ds.lon[0] < ds.lon[-1] else (ds.lon <= lon_max) & (ds.lon >= lon_min)
+
             ds = ds.sel(time=~((ds['time.month'] == 2) & (ds['time.day'] == 29)))
-            ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), lat=lat_slc, lon=lon_slc)
+            #ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'), lat=lat_slc, lon=lon_slc)
+            ds = ds.sel(time=slice(f'{start_year}-01-01', f'{end_year}-12-31'))
+            ds = ds.where(lat_cond & lon_cond, drop=True)
+            
         if ds.dims['time'] > 0 and ds.dims['lat'] > 0 and ds.dims['lon'] > 0:
             new_ds.append(ds)
     print('    -> Selecting and concatenating required data')
@@ -423,10 +433,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
             growing_cycle -= int(crop_dict.get('days_to_vernalization')[0]) #type:ignore
 
         # Consider additional Parameters:
-        if int(crop_dict.get('consider_in_preproc', '0')[0]) in [1, 2]: #type:ignore
-            additional_conditions = [cond for i in range(100) if (cond := crop_dict.get(f'AddCon:{i}')) is not None] #type:ignore
-        else:
-            additional_conditions = []
+        additional_conditions = [cond for i in range(100) if (cond := crop_dict.get(f'AddCon:{i}')) is not None] #type:ignore
 
         # TEMPERATURE
         temp_lower, temp_upper = get_limits(crop_forms, 'temp', crop_dict)
@@ -450,14 +457,14 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
                     curr_mean = np.mean(temp_data, axis=0) #type:ignore
                     add_conds = []
                     for entry in additional_conditions:
-                        if entry[0] == 'Temperature':
+                        if entry[0] == 'Temperature' and int(entry[5]) in [0, 2]:
                             temp_range = temp_data[int(entry[1]):int(entry[2])]
                             add_conds.append(calculate_add_condition(entry, temp_range))
                 else:
                     curr_mean = np.mean(temp_data[timeslice*growing_cycle:(timeslice+1)*growing_cycle], axis=0) #type:ignore
                     add_conds = []
                     for entry in additional_conditions:
-                        if entry[0] == 'Temperature':
+                        if entry[0] == 'Temperature' and int(entry[5]) in [0, 2]:
                             temp_range = temp_data[timeslice*growing_cycle+int(entry[1]):(timeslice)*growing_cycle+int(entry[2])]
                             add_conds.append(calculate_add_condition(entry, temp_range))
 
@@ -479,14 +486,14 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
                         curr_mean = np.mean(temp_data[day:day+growing_cycle], axis=0) #type:ignore
                         add_conds = []
                         for entry in additional_conditions:
-                            if entry[0] == 'Temperature':
+                            if entry[0] == 'Temperature' and int(entry[5]) in [0, 2]:
                                 temp_range = temp_data[day + int(entry[1]):day+int(entry[2])]
                                 add_conds.append(calculate_add_condition(entry, temp_range))
                     else:
                         curr_mean = np.mean(temp_data[(year * 365) + day : (year*365) + day + growing_cycle], axis=0) #type:ignore
                         add_conds = []
                         for entry in additional_conditions:
-                            if entry[0] == 'Temperature':
+                            if entry[0] == 'Temperature' and int(entry[5]) in [0, 2]:
                                 temp_range = temp_data[(year * 365) + day + int(entry[1]) : (year*365) + day + int(entry[2])]
                                 add_conds.append(calculate_add_condition(entry, temp_range))
                     t_lower[day] += curr_mean <= temp_lower
@@ -520,7 +527,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
                     curr_sum = np.sum(prec_data, axis=0) #type:ignore
                     add_conds = []
                     for entry in additional_conditions:
-                        if entry[0] == 'Precipitation':
+                        if entry[0] == 'Precipitation' and int(entry[5]) in [0, 2]:
                             prec_range = prec_data[day+int(entry[1]):day+int(entry[2])]
                             add_conds.append(calculate_add_condition(entry, prec_range))
 
@@ -528,7 +535,7 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
                     curr_sum = np.sum(prec_data[timeslice*growing_cycle:(timeslice+1)*growing_cycle], axis=0) #type:ignore
                     add_conds = []
                     for entry in additional_conditions:
-                        if entry[0] == 'Precipitation':
+                        if entry[0] == 'Precipitation' and int(entry[5]) in [0, 2]:
                             prec_range = prec_data[timeslice*growing_cycle+entry[1]:(timeslice)*growing_cycle+entry[2]]
                             add_conds.append(calculate_add_condition(entry, prec_range))
 
@@ -549,13 +556,13 @@ def calculate_crop_rrpcf(crop_list, crop_failure_code, temp_files, prec_files, c
                     if downscaling:
                         curr_sum = np.sum(prec_data[day:day+growing_cycle], axis=0) #type:ignore
                         for entry in additional_conditions:
-                            if entry[0] == 'Precipitation':
+                            if entry[0] == 'Precipitation' and int(entry[5]) in [0, 2]:
                                 prec_range = prec_data[day+int(entry[1]):day+int(entry[2])]
                                 add_conds.append(calculate_add_condition(entry, prec_range))
                     else:
                         curr_sum = np.sum(prec_data[(year * 365) + day : (year*365) + day + growing_cycle], axis=0) #type:ignore
                         for entry in additional_conditions:
-                            if entry[0] == 'Precipitation':
+                            if entry[0] == 'Precipitation' and int(entry[5]) in [0, 2]:
                                 prec_range = prec_data[(year * 365) + day + int(entry[1]) : (year*365) + day + int(entry[2])]
                                 add_conds.append(calculate_add_condition(entry, prec_range))
                     p_lower[day] += curr_sum <= prec_lower

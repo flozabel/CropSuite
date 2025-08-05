@@ -34,10 +34,9 @@ def crop_rotation(config_file):
             """            
             with ProcessPoolExecutor(max_workers=4) as executor:
                 futures = [executor.submit(compute_combinations, combination[0], combination[1], rotation_dict[combination[0]],
-                                           rotation_dict[combination[1]], resting_period, os.path.join(result_path, area)) for combination in rotation_combinations]
+                                           rotation_dict[combination[1]], resting_period, os.path.join(result_path, area), config_ini) for combination in rotation_combinations]
                 for future in futures:
                     future.result()
-            
 
 
 @njit(parallel=True)
@@ -118,7 +117,7 @@ def calculate_suitabilities_test(suitabilities_a, suitabilities_b, resting, gc_a
                 dates[y, x, 1] = best_j
     return suits, dates
 
-def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
+def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder, config):
     results = os.path.join(results_folder, 'crop_rotation', f'{crop_a}_{crop_b}')
     if os.path.exists(results):
         print(f'-> {results} already exists')
@@ -142,25 +141,33 @@ def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
     suit_b[np.max(suitabilities_b, axis=2) >= suit_a.astype(np.int16)+suit_b.astype(np.int16)] = -1
     suit_a[suit_b <= 0] = -1
     suit_b[suit_a <= 0] = -1
-    dt.write_geotiff(results, f'1-{crop_a}_climatesuitability.tif', suit_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    dt.write_geotiff(results, f'2-{crop_b}_climatesuitability.tif', suit_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    sm = suit_a.astype(np.int16) + suit_b.astype(np.int16)
-    sm[sm <= 0] = -1
-    dt.write_geotiff(results, f'1+2_climatesuitability.tif', sm, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+
+    if config.get('outputs', {}).get('1_climate_suitability', True):
+        dt.write_geotiff(results, f'1-{crop_a}_climatesuitability.tif', suit_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('2_climate_suitability', True):
+        dt.write_geotiff(results, f'2-{crop_b}_climatesuitability.tif', suit_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('12_climate_suitability', True):
+        sm = suit_a.astype(np.int16) + suit_b.astype(np.int16)
+        sm[sm <= 0] = -1
+        dt.write_geotiff(results, f'1+2_climatesuitability.tif', sm, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
 
     date_a = dates[..., 0]
     date_b = dates[..., 1]
     date_a[suit_a == -1] = -1
     date_b[suit_b == -1] = -1
-    dt.write_geotiff(results, f'1-{crop_a}_climate_sowingdate.tif', date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    dt.write_geotiff(results, f'2-{crop_b}_climate_sowingdate.tif', date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('1_sowing_date', True):
+        dt.write_geotiff(results, f'1-{crop_a}_climate_sowingdate.tif', date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('2_sowing_date', True):
+        dt.write_geotiff(results, f'2-{crop_b}_climate_sowingdate.tif', date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
     
     hv_date_a = date_a.copy()
     hv_date_b = date_b.copy()
     hv_date_a[hv_date_a > 0] = (hv_date_a[hv_date_a > 0] + gc_a) % 365
     hv_date_b[hv_date_b > 0] = (hv_date_b[hv_date_b > 0] + gc_b) % 365
-    dt.write_geotiff(results, f'1-{crop_a}_climate_harvestdate.tif', hv_date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    dt.write_geotiff(results, f'2-{crop_b}_climate_harvestdate.tif', hv_date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)    
+    if config.get('outputs', {}).get('1_harvest_date', True):
+        dt.write_geotiff(results, f'1-{crop_a}_climate_harvestdate.tif', hv_date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('2_harvest_date', True):
+        dt.write_geotiff(results, f'2-{crop_b}_climate_harvestdate.tif', hv_date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)    
     del hv_date_a, hv_date_b
 
     soil_a = dt.read_raster_to_array(os.path.join(results_folder, crop_a, 'soil_suitability.tif')).astype(np.int8)
@@ -172,11 +179,14 @@ def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
     suit_b[suit_a <= 0] = -1
     suit_a[suit_b <= 0] = -1
     suit_b[suit_a <= 0] = -1
-    dt.write_geotiff(results, f'1-{crop_a}_cropsuitability.tif', suit_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    dt.write_geotiff(results, f'2-{crop_b}_cropsuitability.tif', suit_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    sm = suit_a.astype(np.int16) + suit_b.astype(np.int16)
-    sm[sm <= 0] = -1
-    dt.write_geotiff(results, f'1+2_cropsuitability.tif', sm, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('1_crop_suitability', True):
+        dt.write_geotiff(results, f'1-{crop_a}_cropsuitability.tif', suit_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('2_crop_suitability', True):
+        dt.write_geotiff(results, f'2-{crop_b}_cropsuitability.tif', suit_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('12_crop_suitability', True):
+        sm = suit_a.astype(np.int16) + suit_b.astype(np.int16)
+        sm[sm <= 0] = -1
+        dt.write_geotiff(results, f'1+2_cropsuitability.tif', sm, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
 
     date_a[soil_a <= 0] = -1
     date_a[(suit_a == -1) | (suit_b < 0)] = -1
@@ -184,12 +194,16 @@ def compute_combinations(crop_a, crop_b, gc_a, gc_b, resting, results_folder):
     date_b[(suit_b == -1) | (suit_a < 0)] = -1
     date_b[date_a < 0] = -1
     date_a[date_b < 0] = -1
-    dt.write_geotiff(results, f'1-{crop_a}_crop_sowingdate.tif', date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    dt.write_geotiff(results, f'2-{crop_b}_crop_sowingdate.tif', date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('1_sowing_date', True):
+        dt.write_geotiff(results, f'1-{crop_a}_crop_sowingdate.tif', date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('2_sowing_date', True):
+        dt.write_geotiff(results, f'2-{crop_b}_crop_sowingdate.tif', date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
     date_a[date_a > 0] = (date_a[date_a > 0] + gc_a) % 365
     date_b[date_b > 0] = (date_b[date_b > 0] + gc_b) % 365
-    dt.write_geotiff(results, f'1-{crop_a}_crop_harvestdate.tif', date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
-    dt.write_geotiff(results, f'2-{crop_b}_crop_harvestdate.tif', date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('1_harvest_date', True):
+        dt.write_geotiff(results, f'1-{crop_a}_crop_harvestdate.tif', date_a, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
+    if config.get('outputs', {}).get('2_harvest_date', True):
+        dt.write_geotiff(results, f'2-{crop_b}_crop_harvestdate.tif', date_b, extent=extent, nodata_value=-1, dtype='int', inhibit_message=True)
 
     del dates, suits, soil_a, soil_b, date_a, date_b, suit_a, suit_b
 

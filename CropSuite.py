@@ -191,6 +191,7 @@ def run(silent_mode=False, config_file=None, gui = None, no_version_check = Fals
     final_shape = dt.get_resolution_array(climate_config, extent, True)
     ram = int((psutil.virtual_memory().total / (1024 ** 3)) * 0.85)
     no_tiles = int(np.clip((final_shape[0] * final_shape[1]) * 10e-6 / ram, 1, 100000)) if climate_config['options'].get('use_scheduler', 1) else 1
+    no_tiles = np.clip(no_tiles, a_min=1, a_max=int(extent[0] - extent[2]))
     full_extent = extent
     def adjust_extent_0(extent, resolution):
         return extent[2] + ((extent[0] - extent[2]) // resolution ) * resolution

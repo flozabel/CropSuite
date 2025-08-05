@@ -145,7 +145,24 @@ def read_geotiff(filepath, resolution, resolution_mode=50, day=-1):
     print(f' -> Data loaded with shape {data.shape} and nodata value {nodata}')
     return data, bounds
 
-def read_geotiff_mean(filepath, resolution, resolution_mode=50):
+def read_geotiff_mean(filepath, resolution, resolution_mode=50, custom_coords=()):
+
+    if custom_coords != ():
+        with rasterio.open(filepath, 'r') as dataset:
+            width = dataset.width
+            height = dataset.height
+            nodata = dataset.nodata
+            bounds = dataset.bounds
+
+            y, x = custom_coords
+            row, col = dataset.index(x, y)
+
+            data = dataset.read()[row, col].astype(np.float32)
+            data[data == nodata] = np.nan
+
+            print(f" -> Time series at point ({x}, {y}) extracted with shape {data.shape}")
+            return data, bounds
+
     with rasterio.open(filepath, 'r') as dataset:
         width = dataset.width
         height = dataset.height
@@ -180,7 +197,11 @@ def get_layers(filepath):
         if src.count > 1:
             return src.shape[1]
         return 1
-    
+
+def get_bounds(filepath):
+    with rasterio.open(filepath) as src:
+        return src.bounds
+
 def get_limiting_factors(filename):
     filename = os.path.join(os.path.dirname(filename), 'limiting_factor.inf')
     if os.path.exists(filename):

@@ -27,7 +27,8 @@ except:
     from src import viewer_plot as vp
 
 with open('CropSuite_GUI.py', 'r', encoding='utf-8') as file:
-    version = re.search(r"version\s*=\s*'(\d+\.\d+\.\d+)'", file.readlines()[52]).group(1) #type:ignore
+    text = file.read()
+    version = re.search(r"version\s*=\s*'(\d+\.\d+\.\d+)'", text).group(1) #type:ignore
 
 
 class ToolTip:
@@ -126,11 +127,19 @@ class ViewerGUI(tk.Toplevel):
         self.bcolor = "#{:02x}{:02x}{:02x}".format(self.bcolor[0] // 256, self.bcolor[1] // 256, self.bcolor[2] // 256)
         self.fig.patch.set_facecolor(self.bcolor)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.map_frame)
+        self.canvas.mpl_connect('button_press_event', self.on_click)
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.map_frame)
         self.toolbar.update()
         self.toolbar.pack(side="top", fill="x")
         self.canvas.get_tk_widget().pack(fill='both', expand=True)
         self.plot_empty()
+
+    def on_click(self, event):
+        if event.dblclick:
+            if event.xdata is not None and event.ydata is not None:
+                self.area_x.set(event.xdata)
+                self.area_y.set(event.ydata)
+                print(f"Coordinates set x={self.area_x}, y={self.area_y}")
 
     def switch_to_old_version(self):
         self.destroy()
@@ -297,21 +306,34 @@ class ViewerGUI(tk.Toplevel):
                 self.check_extent_proj(selected_path)
 
                 bnds = vp.get_layers(selected_path)
+                bounds = vp.get_bounds(selected_path)
                 if bnds > 1:
                     self.band_count.set(bnds)
                     self.layer_spbx.config(state='normal')
                     self.mlayer_cb.config(state='normal')
+                    self.area_spbx_x.configure(**{"from": bounds.left, "to": bounds.right})
+                    self.area_spbx_y.configure(**{"from": bounds.bottom, "to": bounds.top})
+                    self.area_x.set(bounds.left + ((bounds.right - bounds.left) / 2))
+                    self.area_y.set(bounds.bottom + ((bounds.top - bounds.bottom) / 2))
                 else:
                     self.band_count.set(1)
                     self.layer_spbx.config(state='disabled')
                     self.mlayer_mean.set(0)
                     self.mlayer_cb.config(state='disabled')
+                    self.rb_custom.config(state='disabled')
+                    self.rb_mean.config(state='disabled')
+                    self.area_spbx_x.config(state='disabled')
+                    self.area_spbx_y.config(state='disabled')
             else:
                 self.plot_button.config(state='disabled')
                 self.mlayer_mean.set(0)
                 self.mlayer_cb.config(state='disabled')
                 self.band_count.set(0)
                 self.layer_spbx.config(state='disabled')
+                self.rb_custom.config(state='disabled')
+                self.rb_mean.config(state='disabled')
+                self.area_spbx_x.config(state='disabled')
+                self.area_spbx_y.config(state='disabled')
         except:
             pass
 
@@ -376,32 +398,68 @@ class ViewerGUI(tk.Toplevel):
     ### MULTILAYER OPTIONS ###
 
     def multlay_options(self, parent):
-        lay_frame = tk.Frame(parent)
-        lay_frame.pack(fill=tk.X, pady=2, expand=True)
+        lay_frame = vp.ToggledFrame(parent, 'Multilayer options')
+        lay_frame.pack(fill='x', expand=True)
+
+        lay_subframe = tk.Frame(lay_frame.sub_frame)
+        lay_subframe.pack(fill='x', expand=True)
+
+        layer_toprow = tk.Frame(lay_subframe)
+        layer_toprow.pack(fill='x', padx=2, pady=2)
+
         self.layer_var = tk.IntVar(master=self, value=1)
         self.band_count = tk.IntVar(master=self, value=0)
-        self.layer_spbx = ttk.Spinbox(lay_frame, from_=1, to=365, textvariable=self.layer_var, width=5, increment=1, state=DISABLED)
-        self.layer_spbx.pack(side="left")
+        self.layer_spbx = ttk.Spinbox(layer_toprow, from_=1, to=365, textvariable=self.layer_var, width=5, increment=1, state=DISABLED)
+        self.layer_spbx.pack(side='left')
 
         self.label_var = tk.StringVar()
-        self.band_label = ttk.Label(lay_frame, textvariable=self.label_var)
-        self.band_label.pack(side="left")
+        self.band_label = ttk.Label(layer_toprow, textvariable=self.label_var)
+        self.band_label.pack(side='left', padx=5)
 
         self.band_count.trace_add("write", self.update_label)
         for ev in ("<FocusOut>", "<Return>", "<<Increment>>", "<<Decrement>>"):
             self.layer_spbx.bind(ev, lambda e: self.plot())
 
-        mn_frame = tk.Frame(parent)
+        mn_frame = tk.Frame(lay_subframe)
         mn_frame.pack(fill='x', pady=2, expand=True)
+
         self.mlayer_mean = tk.IntVar(master=self, value=0)
-        self.mlayer_cb = tk.Checkbutton(mn_frame, variable=self.mlayer_mean, text='Time course (mean)', state='disabled', command=self.on_check)
+        self.mlayer_cb = tk.Checkbutton(mn_frame, variable=self.mlayer_mean, text='Time course', state='disabled', command=self.on_check)
         self.mlayer_cb.pack(side='left')
+
+        area_frame = tk.Frame(lay_subframe)
+        area_frame.pack(fill='x', pady=2, expand=True)
+
+        self.area_mode = tk.StringVar(value='mean')
+        self.rb_custom = ttk.Radiobutton(area_frame, text="", variable=self.area_mode, value='custom', state=DISABLED, command=self.radio_check)
+        self.rb_custom.pack(side='left')
+        self.area_x = tk.DoubleVar(value=0)
+        self.area_y = tk.DoubleVar(value=0)
+        self.area_spbx_x = ttk.Spinbox(area_frame, from_=0, to=100, increment=.1, textvariable=self.area_x, width=5, state=DISABLED)
+        self.area_spbx_y = ttk.Spinbox(area_frame, from_=0, to=100, increment=.1, textvariable=self.area_y, width=5, state=DISABLED)
+        self.area_spbx_x.pack(side='left', padx=(2, 2))
+        self.area_spbx_y.pack(side='left', padx=(0, 5))
+
+        self.rb_mean = ttk.Radiobutton(area_frame, text="Spatial mean", variable=self.area_mode, value='mean', state=DISABLED, command=self.radio_check)
+        self.rb_mean.pack(side='left')
+
+    def radio_check(self):
+        if self.area_mode.get() == 'mean':
+            self.area_spbx_x.config(state='disabled')
+            self.area_spbx_y.config(state='disabled')
+        else:
+            self.area_spbx_x.config(state='normal')
+            self.area_spbx_y.config(state='normal')    
 
     def on_check(self):
         if self.mlayer_mean.get() == 1:
             self.layer_spbx.configure(state="disabled")
+            self.rb_custom.config(state='normal')
+            self.rb_mean.config(state='normal')
         else:
             self.layer_spbx.configure(state="normal")
+            self.rb_custom.config(state='disabled')
+            self.rb_mean.config(state='disabled')
 
     def update_label(self, *args):
         self.label_var.set(f"out of {self.band_count.get()}")
@@ -460,8 +518,13 @@ class ViewerGUI(tk.Toplevel):
             day = int(self.layer_var.get())
             print(f' -> Loading data for #{day}')
         
-        if self.mlayer_mean.get() == 1:
+        if self.area_mode.get() == 'mean' and self.mlayer_mean.get() == 1:
             data, bounds = vp.read_geotiff_mean(filepath=filepath, resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()))
+            self.plot_2d_on_canvas(data)
+            return
+        elif self.area_mode.get() == 'custom' and self.mlayer_mean.get() == 1:
+            x, y = self.area_x.get(), self.area_y.get()
+            data, bounds = vp.read_geotiff_mean(filepath=filepath, resolution=self.canvas.get_width_height()[0], resolution_mode=int(self.qual_val.get()), custom_coords=(y, x))
             self.plot_2d_on_canvas(data)
             return
         else:
@@ -544,8 +607,8 @@ class ViewerGUI(tk.Toplevel):
             self.cbar_label = 'Crop Rotation Suitability []'
             self.nodata_patch = 'first'
             self.labels = ['Unsuitable', 'Marginally Suitable', 'Moderately Suitable', 'Highly Suitable', 'Very highly Suitable']
-        elif f in ['optimal_sowing_date_rrpcf', 'optimal_sowing_date_mc_first_rrpcf', 'optimal_sowing_date_mc_second_rrpcf', 'optimal_sowing_date_mc_third_rrpcf'] or\
-            os.path.splitext(f)[0].endswith('_rrpcf'):
+        elif f in ['rrpcf', 'optimal_sowing_date_rrpcf', 'optimal_sowing_date_mc_first_rrpcf', 'optimal_sowing_date_mc_second_rrpcf', 'optimal_sowing_date_mc_third_rrpcf'] or\
+            os.path.splitext(f)[0].startswith('rrpcf_'):
             if self.comp_val.get() == 1:
                 self.cmap_box.current(22)
                 self.min_val, self.max_val = -100, 100

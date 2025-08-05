@@ -511,7 +511,7 @@ def write_to_netcdf(data, filename, dimensions=['lat', 'lon'], extent=None, comp
         ds.setncattr('Institution', 'University of Basel, Department of Environmental Sciences')
         ds.setncattr('Contact', 'Florian Zabel & Matthias Knuettel, florian.zabel@unibas.ch')
         ds.setncattr('Creation_Time', datetime.now().strftime("%d.%m.%Y - %H:%M"))
-        ds.setncattr('Info', 'Created by CropSuite v1.0.1')
+        ds.setncattr('Info', 'Created by CropSuite v1.5.0')
         if isinstance(info_text, str):
             ds.setncattr('Info', info_text)
     return filename
@@ -572,7 +572,7 @@ def create_append_netcdf(filename, data, dimensions=['lat', 'lon'], extent=None,
     ds.attrs['Institution'] = 'University of Basel, Department of Environmental Sciences'
     ds.attrs['Contact'] = 'Florian Zabel & Matthias Knuettel, florian.zabel@unibas.ch'
     ds.attrs['Creation_Time'] = f'{datetime.now().strftime("%d.%m.%Y - %H:%M")}'
-    ds.attrs['Info'] = 'Created by CropSuite v1'
+    ds.attrs['Info'] = 'Created by CropSuite v1.5.0'
     if isinstance(info_text, str):
         ds.attrs['Info'] = info_text
 
@@ -656,7 +656,7 @@ def merge_netcdf_files(file_list, output_file, overlap=0, nodata_value=False, in
     ds.attrs['Institution'] = 'University of Basel, Department of Environmental Sciences'
     ds.attrs['Contact'] = 'Florian Zabel, florian.zabel@unibas.ch'
     ds.attrs['Creation_Time'] = f'{datetime.now().strftime("%d.%m.%Y - %H:%M")}'
-    ds.attrs['Info'] = 'Created by CropSuite v1'
+    ds.attrs['Info'] = 'Created by CropSuite v1.5.0'
     if isinstance(info_text, str):
         ds.attrs['Info'] = info_text
 

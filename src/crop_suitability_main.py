@@ -747,16 +747,18 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
         top, left, bottom, right = extent
         height, width = ph_add.shape
         transform = from_bounds(left, bottom, right, top, width, height)
-        with rasterio.open(os.path.join(results_path, 'ph_increase.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
-                            crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
-            dst.write((ph_add.astype(np.float32)).astype(np.int8), 1)
+        if config.get('outputs', {}).get('ph_increase', True):
+            with rasterio.open(os.path.join(results_path, 'ph_increase.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
+                                crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+                dst.write((ph_add.astype(np.float32)).astype(np.int8), 1)
 
         ph_write = parameter_array[..., ph_index].copy()
         ph_write[ph_write <= 0] = -.1
         ph_write = ph_write.astype(np.float32)
-        with rasterio.open(os.path.join(results_path, 'ph_after_liming.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
-                            crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
-            dst.write(ph_write, 1)
+        if config.get('outputs', {}).get('ph_after_liming', True):
+            with rasterio.open(os.path.join(results_path, 'ph_after_liming.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
+                                crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+                dst.write(ph_write, 1)
         del ph_write
 
         texture_index = parameter_list.index('texture')
@@ -769,9 +771,10 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
         lut = np.zeros(keys.max() + 1)
         lut[keys] = np.array(list(texture_caco3_dict.values()))
         caco_array = lut[texture_class] * ph_add * 10
-        with rasterio.open(os.path.join(results_path, 'lime_application.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
-                            crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
-            dst.write(caco_array, 1)
+        if config.get('outputs', {}).get('lime_application', True):
+            with rasterio.open(os.path.join(results_path, 'lime_application.tif'), 'w', driver='GTiff', height=height, width=width, count=1, dtype=rasterio.float32,
+                                crs="EPSG:4326", transform=transform, nodata=-1,compress='LZW') as dst:
+                dst.write(caco_array, 1)
 
     formulas = [plant for plant in plant_formulas[plant_list[0]]]
     formulas = dict(zip(formulas, np.arange(0, len(formulas))))
@@ -830,13 +833,19 @@ def cropsuitability(config, clim_suit, lim_factor, plant_formulas, plant_params,
             dt.write_geotiff(res_path, 'all_suitability_vals.tif', suitability_array, extent, dtype='int', nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
             
         if config['options']['output_format'] == 'geotiff' or config['options']['output_format'] == 'cgo':
-            dt.write_geotiff(res_path, 'crop_suitability.tif', suitability, extent, nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
-            dt.write_geotiff(res_path, 'crop_limiting_factor.tif', min_indices, extent, nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
-            dt.write_geotiff(res_path, 'soil_suitability.tif', soil_suitablility, extent, dtype='int', nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
+            if config.get('outputs', {}).get('crop_suitability', True):
+                dt.write_geotiff(res_path, 'crop_suitability.tif', suitability, extent, nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
+            if config.get('outputs', {}).get('crop_limiting_factor', True):
+                dt.write_geotiff(res_path, 'crop_limiting_factor.tif', min_indices, extent, nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
+            if config.get('outputs', {}).get('soil_suitability', True):
+                dt.write_geotiff(res_path, 'soil_suitability.tif', soil_suitablility, extent, dtype='int', nodata_value=-1, cog=config['options']['output_format'].lower() == 'cog')
         elif config['options']['output_format'] == 'netcdf4':
-            nc.write_to_netcdf(suitability, os.path.join(res_path, 'crop_suitability.nc'), extent=extent, compress=True, var_name='crop_suitability', nodata_value=-1) #type:ignore
-            nc.write_to_netcdf(min_indices, os.path.join(res_path, 'crop_limiting_factor.nc'), extent=extent, compress=True, var_name='crop_limiting_factor', nodata_value=-1) #type:ignore
-            nc.write_to_netcdf(soil_suitablility, os.path.join(res_path, 'soil_suitability.nc'), extent=extent, compress=True, var_name='soil_suitability', nodata_value=-1) #type:ignore
+            if config.get('outputs', {}).get('crop_suitability', True):
+                nc.write_to_netcdf(suitability, os.path.join(res_path, 'crop_suitability.nc'), extent=extent, compress=True, var_name='crop_suitability', nodata_value=-1) #type:ignore
+            if config.get('outputs', {}).get('crop_limiting_factor', True):
+                nc.write_to_netcdf(min_indices, os.path.join(res_path, 'crop_limiting_factor.nc'), extent=extent, compress=True, var_name='crop_limiting_factor', nodata_value=-1) #type:ignore
+            if config.get('outputs', {}).get('soil_suitability', True):
+                nc.write_to_netcdf(soil_suitablility, os.path.join(res_path, 'soil_suitability.nc'), extent=extent, compress=True, var_name='soil_suitability', nodata_value=-1) #type:ignore
         else:
             print('No output format specified.')
 

@@ -7,9 +7,11 @@ import numpy as np
 try:
     import read_climate_ini as rci
     import read_plant_params as rpp
+    import config_phenology
 except:
     from src import read_climate_ini as rci
     from src import read_plant_params as rpp
+    from src import config_phenology
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -45,7 +47,7 @@ class plant_param_gui(tk.Frame):
         self.params = [self.label_dict.get(param, param) for param in self.param_keys]
 
         self.root = root
-        x, y = int(550 * self.fact), int(800 * self.fact)
+        x, y = int(550 * self.fact), int(850 * self.fact)
         self.root.geometry(f'{x}x{y}+{(self.root.winfo_screenwidth() - x) // 2}+{(self.root.winfo_screenheight() - y) // 2}')
         self.root.title(f'CropSuite - {crop.capitalize()} Parameterization')
         self.root.resizable(1, 1) #type:ignore
@@ -163,6 +165,12 @@ class plant_param_gui(tk.Frame):
 
         ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
 
+        phen_frame = Frame(root)
+        phen_frame.pack(fill='x', padx=5)
+        self.phenology_button = tk.Button(phen_frame, text='Configure Phenology', command=self.open_phenology_window, state='normal' if self.growing_cycle_var.get() < 365 else 'disabled')
+        self.phenology_button.pack(side='top', padx=5, pady=5)
+        ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
+
         ### CROP REQUIREMENTS ### 
 
         Label(root, text='Crop-specific growth requirements:').pack(anchor='w', padx=5, pady=5)
@@ -210,7 +218,7 @@ class plant_param_gui(tk.Frame):
         add_cond_frm = Frame(root)
         add_cond_frm.pack(fill='x', padx=5)
 
-        self.additionals_but = Button(add_cond_frm, text='Configure additional requirements', width=30, state='normal',
+        self.additionals_but = Button(add_cond_frm, text='Configure additional climate conditions', width=30, state='normal',
                                       command=self.add_conditions_window)
         self.additionals_but.pack(side='right', padx=5, pady=5)
         ttk.Separator(root, orient='horizontal').pack(padx=5, pady=5, fill='x')
@@ -219,10 +227,10 @@ class plant_param_gui(tk.Frame):
         self.botton_frame = tk.Frame(root)
         self.botton_frame.pack(fill=tk.X, side='bottom')
 
-        cancel_button = tk.Button(self.botton_frame, text="Exit", command=self.root.destroy)
+        cancel_button = tk.Button(self.botton_frame, text="Exit", command=self.root.destroy, width=10)
         cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.save_button = tk.Button(self.botton_frame, text="Save", command=lambda: [self.save(), self.root.destroy()])
+        self.save_button = tk.Button(self.botton_frame, text="Save", command=lambda: [self.save(), self.root.destroy()], width=10)
         self.save_button.pack(side=tk.RIGHT, padx=5, pady=5)
 
     def set_germination_requirements(self):
@@ -525,17 +533,16 @@ class plant_param_gui(tk.Frame):
 
         crop = str(self.plant).split('.')[0].capitalize()
 
-        x, y = int(550 * self.fact), int(400 * self.fact)
+        x, y = int(650 * self.fact), int(400 * self.fact)
         self.addcon_root.geometry(f'{x}x{y}+{(self.addcon_root.winfo_screenwidth() - x) // 2}+{(self.addcon_root.winfo_screenheight() - y) // 2}')
-        self.addcon_root.title(f'Additional Conditions - {crop}')
-        self.addcon_root.resizable(0, 0) #type:ignore
+        self.addcon_root.title(f'Additional Climate Conditions - {crop}')
+        self.addcon_root.resizable(1, 1) #type:ignore
         self.addcon_root.focus_force()
 
-        options = ["only climate suitability", "only climate variability", "climate variability and climate suitability"]
-        self.cons_preproc_var = StringVar(self.addcon_root, options[int(self.crop_dict.get('consider_in_preproc', options[0]))])
-        cons_preproc_cb = ttk.Combobox(self.addcon_root, textvariable=self.cons_preproc_var, values=options, state="readonly", width=50)
-        cons_preproc_cb.pack(anchor='w', padx=5, pady=5)
-
+        #options = ["only climate suitability", "only climate variability", "climate variability and climate suitability"]
+        #self.cons_preproc_var = StringVar(self.addcon_root, options[int(self.crop_dict.get('consider_in_preproc', 0))])
+        #cons_preproc_cb = ttk.Combobox(self.addcon_root, textvariable=self.cons_preproc_var, values=options, state="readonly", width=50)
+        #cons_preproc_cb.pack(anchor='w', padx=5, pady=5)
 
         #self.cons_preproc_var = IntVar(self.addcon_root, int(self.crop_dict.get('consider_in_preproc', 0) in [1, 'y']))
         #cons_preproc_cb = Checkbutton(self.addcon_root, text='Consider in Preprocessing', variable=self.cons_preproc_var)
@@ -583,52 +590,79 @@ class plant_param_gui(tk.Frame):
 
         for i in range(100):
             if f'AddCon:{i}' in self.crop_dict.keys():
-                first = 0 if self.crop_dict.get(f'AddCon:{i}')[0] == 'Temperature' else 1 #type:ignore
-                second = int(self.crop_dict.get(f'AddCon:{i}')[1])-1 #type:ignore
-                third = int(self.crop_dict.get(f'AddCon:{i}')[2])-1 #type:ignore
-                cond = self.crop_dict.get(f'AddCon:{i}')[3] #type:ignore
+                first = 0 if self.crop_dict.get(f'AddCon:{i}', [0, 0, 0, 0, 0, 0])[0] == 'Temperature' else 1 #type:ignore
+                second = int(self.crop_dict.get(f'AddCon:{i}', [0, 0, 0, 0, 0, 0])[1])-1 #type:ignore
+                third = int(self.crop_dict.get(f'AddCon:{i}', [0, 0, 0, 0, 0, 0])[2])-1 #type:ignore
+                cond = self.crop_dict.get(f'AddCon:{i}', [0, 0, 0, 0, 0, 0])[3] #type:ignore
                 fourth = 0 if cond == '>' else 1 if cond == '>=' else 2 if cond == '<=' else 3 
-                fifth = float(self.crop_dict.get(f'AddCon:{i}')[4]) #type:ignore
-                self.add_row(self.crop_dict, values=[first, second, third, fourth, fifth])
+                fifth = float(self.crop_dict.get(f'AddCon:{i}', [0, 0, 0, 0, 0, 0])[4]) #type:ignore
+                sixth = int((self.crop_dict.get(f'AddCon:{i}', ''))[5]) if len(self.crop_dict.get(f'AddCon:{i}', '')) == 6 else 0
+                self.add_row(self.crop_dict, values=[first, second, third, fourth, fifth, sixth])
 
-    def add_row(self, crop_dict, values=[0, 0, 0, 0, 0]):
+    def add_row(self, crop_dict, values=[0, 0, 0, 0, 0, 0]):
         self.row_count += 1
         row_idx = self.row_count
 
         lgc = int(crop_dict.get('growing_cycle', 0))
-        widths = [3, 12, 5, 5, 5, 8]
+        widths = [3, 12, 5, 5, 5, 8, 24]
 
         row_num_label = tk.Label(self.table_frame, text=str(row_idx), padx=10, pady=5, width=widths[0])
         row_num_label.grid(row=row_idx, column=0)
+
         param_combobox = ttk.Combobox(self.table_frame, values=["Temperature", "Precipitation"], width=widths[1])
         param_combobox.grid(row=row_idx, column=1)
-        start_combobox = ttk.Combobox(self.table_frame, values=list(range(1, lgc+2)), width=widths[2]) #type:ignore
+        param_combobox.configure(justify='center')
+
+        start_combobox = ttk.Combobox(self.table_frame, values=list(range(1, lgc + 1)), width=widths[2])  # type:ignore
         start_combobox.grid(row=row_idx, column=2)
-        end_combobox = ttk.Combobox(self.table_frame, values=list(range(1, lgc+2)), width=widths[3]) #type:ignore
+        start_combobox.configure(justify='center')
+
+        end_combobox = ttk.Combobox(self.table_frame, values=list(range(1, lgc + 1)), width=widths[3])  # type:ignore
         end_combobox.grid(row=row_idx, column=3)
+        end_combobox.configure(justify='center')
+
         condition_combobox = ttk.Combobox(self.table_frame, values=[">", ">=", "<=", "<"], width=widths[4])
         condition_combobox.grid(row=row_idx, column=4)
+        condition_combobox.configure(justify='center')
+
         entry_value = tk.Entry(self.table_frame, width=widths[5])
         entry_value.grid(row=row_idx, column=5)
+        entry_value.configure(justify='center')
 
-        if values != [0, 0, 0, 0, 0]:
+        mode_list = ['Apply annually', 'Apply to climate average', 'Apply annually and to average']
+        mode_lab = tk.StringVar(master=self.table_frame, value=mode_list[values[5]])
+
+        def change_val():
+            current_index = mode_list.index(mode_lab.get())
+            next_index = (current_index + 1) % len(mode_list)
+            mode_lab.set(mode_list[next_index])
+
+        mode_button = tk.Button(self.table_frame, width=widths[6], textvariable=mode_lab, command=change_val)
+        mode_button.grid(row=row_idx, column=6)
+
+        if values != [0, 0, 0, 0, 0, 0]:
             param_combobox.current(values[0])
             start_combobox.current(values[1])
             end_combobox.current(values[2])
             condition_combobox.current(values[3])
-            condition_combobox.current(values[3])
-            entry_value.delete(0, END)
+            entry_value.delete(0, tk.END)
             entry_value.insert(0, values[4])
-        self.row_data.append([param_combobox, start_combobox, end_combobox, condition_combobox, entry_value])
+            mode_lab.set(mode_list[values[5]])
+
+        self.row_data.append([param_combobox, start_combobox, end_combobox, condition_combobox, entry_value, mode_lab, mode_button, row_num_label])
 
     def remove_row(self):
         if self.row_data:
-            for widget in self.row_data[-1]:
-                widget.grid_forget()  # Remove widgets
-            self.row_data.pop()  # Remove from data structure
+            last_row = self.row_data.pop()
+            for widget in last_row:
+                try:
+                    widget.grid_forget()
+                except AttributeError:
+                    pass
             self.row_count -= 1
 
     def save_data(self):
+        mode_list = ['Apply annually', 'Apply to climate average', 'Apply annually and to average']
         data = []
         for i, row in enumerate(self.row_data, start=1):
             param = row[0].get()
@@ -636,10 +670,15 @@ class plant_param_gui(tk.Frame):
             end = row[2].get()
             condition = row[3].get()
             val = row[4].get()
-            data.append([i, param, start, end, condition, val])
+            usage = mode_list.index(row[5].get())
+            data.append([i, param, start, end, condition, val, usage])
         self.add_data_to_crop_dict(data)
         self.addcon_root.destroy()
     
+    def open_phenology_window(self):
+        config_phenology.PhenologyWindow(self)
+
+
     def add_data_to_crop_dict(self, data):
         for i in range(100):
             try:
@@ -686,10 +725,12 @@ class plant_param_gui(tk.Frame):
             self.winter_cb.config(bg='SeaGreen1')
             self.winter_frm.config(bg='SeaGreen1')
             self.winter_but.config(state='normal')
+            self.phenology_button.config(state='disabled')
         else:
             self.winter_cb.config(bg=self.root.cget("bg"))
             self.winter_frm.config(bg=self.root.cget("bg"))
             self.winter_but.config(state='disabled')
+            self.phenology_button.config(state='normal')
     
     def find_percentiles(self, x, y, p):
         cdf = cumulative_trapezoid(y / np.trapz(y, x), x, initial=0)
@@ -812,10 +853,10 @@ class plant_param_gui(tk.Frame):
                 else:
                     value_str = str(value)
                 write_file.write(f'{key} = \t\t{value_str}\n')
-            if hasattr(self, 'cons_preproc_var'):
-                options = ["only climate suitability", "only climate variability", "climate variability and climate suitability"]
-                val = options.index(self.cons_preproc_var.get())
-                write_file.write(f'consider_in_preproc = \t\t{val}\n')
+            #if hasattr(self, 'cons_preproc_var'):
+            #    options = ["only climate suitability", "only climate variability", "climate variability and climate suitability"]
+            #    val = options.index(self.cons_preproc_var.get())
+            #    write_file.write(f'consider_in_preproc = \t\t{val}\n')
         # self.root.destroy()
 
     def add_memship(self):
@@ -871,8 +912,10 @@ class plant_param_gui(tk.Frame):
         if self.growing_cycle_perennial_var.get() == 1:
             self.growing_cycle_var.set(365)
             self.growing_cycle_entry.config(state='disabled')
+            self.phenology_button.config(state='disabled')
         else:
             self.growing_cycle_entry.config(state='normal')
+            self.phenology_button.config(state='normal')
             self.growing_cycle_var.set(int(self.crop_dict.get('growing_cycle', 0))) 
 
     def check_lgc_value(self):
@@ -1044,9 +1087,9 @@ def open_gui(config_ini_path, plant_inf):
     root.wait_window(plant_window.root)
 
 if __name__ == '__main__':
-    pass
-    # config_ini_path = r"U:\Source Code\CropSuite\world_config.ini"
-    # root = Tk()
-    # root.withdraw()
-    # plant_window = plant_param_gui(tk.Toplevel(root), config_ini_path, plant='Maize_plutor.inf')
-    # root.wait_window(plant_window.root)
+    #pass
+    config_ini_path = r"U:\Source Code\CropSuite\config.ini"
+    root = Tk()
+    root.withdraw()
+    plant_window = plant_param_gui(tk.Toplevel(root), config_ini_path, plant='Maize_plutor.inf')
+    root.wait_window(plant_window.root)
